@@ -1,0 +1,167 @@
+{
+  "entities": {
+    "video": {
+      "title": "Video",
+      "description": "A video stream published on SVTech Media",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 5000 },
+        "videoUrl": { "type": "string", "maxLength": 1000 },
+        "thumbnailUrl": { "type": "string", "maxLength": 1000 },
+        "duration": { "type": "number" },
+        "durationFormatted": { "type": "string", "maxLength": 20 },
+        "views": { "type": "number" },
+        "category": { "type": "string", "maxLength": 50 },
+        "channelId": { "type": "string", "maxLength": 128 },
+        "likes": { "type": "number" },
+        "dislikes": { "type": "number" },
+        "status": { "type": "string", "enum": ["published", "draft", "scheduled", "unlisted"] },
+        "visibility": { "type": "string", "enum": ["public", "private", "unlisted"] },
+        "isFeatured": { "type": "boolean" },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["title", "videoUrl", "channelId", "status", "visibility"]
+    },
+    "channel": {
+      "title": "Channel",
+      "description": "Creator channel profile on SVTech Media",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "maxLength": 100 },
+        "handle": { "type": "string", "maxLength": 60 },
+        "avatarUrl": { "type": "string", "maxLength": 1000 },
+        "bannerUrl": { "type": "string", "maxLength": 1000 },
+        "subscribers": { "type": "string", "maxLength": 30 },
+        "subscriberCountNumber": { "type": "number" },
+        "verified": { "type": "boolean" },
+        "description": { "type": "string", "maxLength": 2000 },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "joinedDate": { "type": "string", "maxLength": 50 },
+        "totalViews": { "type": "string", "maxLength": 50 },
+        "videosCount": { "type": "number" }
+      },
+      "required": ["name", "handle"]
+    },
+    "short": {
+      "title": "Short",
+      "description": "Vertical 9:16 short form video on SVTech Media",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "maxLength": 200 },
+        "videoUrl": { "type": "string", "maxLength": 1000 },
+        "thumbnailUrl": { "type": "string", "maxLength": 1000 },
+        "channelId": { "type": "string", "maxLength": 128 },
+        "likes": { "type": "number" },
+        "commentsCount": { "type": "number" },
+        "soundTitle": { "type": "string", "maxLength": 100 },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "isFeatured": { "type": "boolean" }
+      },
+      "required": ["title", "videoUrl", "channelId"]
+    },
+    "comment": {
+      "title": "Comment",
+      "description": "User comment on a video or short",
+      "type": "object",
+      "properties": {
+        "videoId": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "userName": { "type": "string", "maxLength": 100 },
+        "userAvatar": { "type": "string", "maxLength": 1000 },
+        "text": { "type": "string", "maxLength": 2000 },
+        "likes": { "type": "number" },
+        "status": { "type": "string", "enum": ["active", "flagged", "removed"] }
+      },
+      "required": ["videoId", "userId", "text"]
+    },
+    "user": {
+      "title": "User",
+      "description": "User account profile and role on SVTech Media",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "maxLength": 255 },
+        "displayName": { "type": "string", "maxLength": 100 },
+        "photoURL": { "type": "string", "maxLength": 1000 },
+        "role": { "type": "string", "enum": ["super_admin", "admin", "moderator", "creator", "user"] },
+        "channelId": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["email", "role"]
+    },
+    "playlist": {
+      "title": "Playlist",
+      "description": "Curated collection of videos",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "maxLength": 150 },
+        "description": { "type": "string", "maxLength": 1000 },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "isPrivate": { "type": "boolean" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["title"]
+    },
+    "report": {
+      "title": "Report",
+      "description": "Content moderation report filed by a user",
+      "type": "object",
+      "properties": {
+        "targetType": { "type": "string", "enum": ["video", "comment", "channel"] },
+        "targetId": { "type": "string", "maxLength": 128 },
+        "reason": { "type": "string", "maxLength": 500 },
+        "reporterId": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["pending", "resolved", "dismissed"] }
+      },
+      "required": ["targetType", "targetId", "reason", "status"]
+    },
+    "activityLog": {
+      "title": "ActivityLog",
+      "description": "Audit trail log for platform events and admin actions",
+      "type": "object",
+      "properties": {
+        "adminId": { "type": "string", "maxLength": 128 },
+        "adminEmail": { "type": "string", "maxLength": 255 },
+        "action": { "type": "string", "maxLength": 100 },
+        "details": { "type": "string", "maxLength": 1000 },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["action", "details"]
+    }
+  },
+  "firestore": {
+    "/videos/{videoId}": {
+      "schema": { "$ref": "#/entities/video" },
+      "description": "All public and creator video catalog"
+    },
+    "/channels/{channelId}": {
+      "schema": { "$ref": "#/entities/channel" },
+      "description": "Channel public profiles"
+    },
+    "/shorts/{shortId}": {
+      "schema": { "$ref": "#/entities/short" },
+      "description": "Short form video reel items"
+    },
+    "/comments/{commentId}": {
+      "schema": { "$ref": "#/entities/comment" },
+      "description": "Public comments on videos"
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/user" },
+      "description": "User profiles and assigned role"
+    },
+    "/playlists/{playlistId}": {
+      "schema": { "$ref": "#/entities/playlist" },
+      "description": "Public and private playlists"
+    },
+    "/reports/{reportId}": {
+      "schema": { "$ref": "#/entities/report" },
+      "description": "Moderation reports queue"
+    },
+    "/activityLogs/{logId}": {
+      "schema": { "$ref": "#/entities/activityLog" },
+      "description": "Platform audit and activity logs"
+    }
+  }
+}

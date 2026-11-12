@@ -1,0 +1,136 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global default-deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == "vipsami612@gmail.com" ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'super_admin'])
+      );
+    }
+
+    function isModerator() {
+      return isAdmin() || (
+        isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'moderator'
+      );
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // Videos
+    match /videos/{videoId} {
+      allow read: if true;
+      allow create: if isSignedIn();
+      allow update: if isAdmin() ||
+        (isSignedIn() && resource.data.ownerUid == request.auth.uid) ||
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['views', 'likes', 'dislikes']));
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid);
+    }
+
+    // Channels
+    match /channels/{channelId} {
+      allow read: if true;
+      allow create: if isSignedIn();
+      allow update: if isAdmin() ||
+        (isSignedIn() && resource.data.ownerUid == request.auth.uid) ||
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['subscribers', 'subscriberCountNumber', 'totalViews', 'videosCount']));
+      allow delete: if isAdmin();
+    }
+
+    // Shorts
+    match /shorts/{shortId} {
+      allow read: if true;
+      allow create: if isSignedIn();
+      allow update: if isAdmin() ||
+        (isSignedIn() && resource.data.ownerUid == request.auth.uid) ||
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes', 'commentsCount']));
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid);
+    }
+
+    // Comments
+    match /comments/{commentId} {
+      allow read: if true;
+      allow create: if isSignedIn();
+      allow update: if isAdmin() || isModerator() ||
+        (isSignedIn() && resource.data.userId == request.auth.uid) ||
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes']));
+      allow delete: if isAdmin() || isModerator() || (isSignedIn() && resource.data.userId == request.auth.uid);
+    }
+
+    // Users
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.auth.uid == userId;
+      allow update: if isAdmin() || (
+        isSignedIn() && request.auth.uid == userId &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role'])
+      );
+      allow delete: if isAdmin();
+    }
+
+    // Playlists
+    match /playlists/{playlistId} {
+      allow read: if true;
+      allow create: if isSignedIn();
+      allow update: if isAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid);
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid);
+    }
+
+    // Reports
+    match /reports/{reportId} {
+      allow read: if isModerator();
+      allow create: if isSignedIn();
+      allow update, delete: if isModerator();
+    }
+
+    // Activity Logs
+    match /activityLogs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+
+    // Transactions (Ethiopian Birr Publishing Fees)
+    match /transactions/{transactionId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow create: if isSignedIn();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Platform Settings
+    match /platformSettings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Video Purchases (PRO Video Watch-to-Unlock)
+    match /videoPurchases/{purchaseId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow create: if isSignedIn();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Notifications
+    match /notifications/{notificationId} {
+      allow read: if true;
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+  }
+}

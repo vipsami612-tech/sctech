@@ -1,0 +1,6 @@
+{
+  "name": "SVTech Media - Video Streaming Platform",
+  "description": "SVTech Media: Watch • Create • Share • Connect. Professional video streaming, creator studio, shorts reel, channel management, and real-time community powered by Firebase.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -25,6 +25,7 @@ export const en = {
     analytics: 'Analytics',
     creatorStudio: 'Creator Studio',
     adminCenter: 'Admin Center',
+    moderatorCenter: 'Moderator Center',
     videoManagement: 'Video Management',
     userManagement: 'User Management',
     moderation: 'Moderation',
@@ -33,6 +34,10 @@ export const en = {
     platformSettings: 'Platform Settings',
     allSubscriptions: 'All Subscriptions',
     noSubscriptions: 'No subscriptions yet.'
+  },
+
+  home: {
+    continueWatching: 'Continue Watching'
   },
 
   // Explore categories
@@ -124,8 +129,16 @@ export const en = {
     chooseLocalFile: 'Choose Local Video File',
     urlPlaceholder: 'https://...',
     samplePresets: 'Presets',
-    thumbnail: 'Custom Video Poster Thumbnail',
-    uploadImage: 'Upload Image',
+    thumbnail: 'Video Thumbnail (16:9 Cover)',
+    uploadImage: 'Upload JPG / PNG / WebP',
+    extractFrame: 'Extract Frame from Video',
+    capturingFrame: 'Capturing 16:9 frame...',
+    frameTimestamp: 'Frame Timestamp',
+    captureAtTimestamp: 'Capture Frame',
+    verifyUrl: 'Verify URL',
+    urlVerified: 'Image verified',
+    removeThumbnail: 'Remove Thumbnail',
+    storageNotConfiguredNotice: 'Firebase Storage is not configured in this environment (missing VITE_FIREBASE_API_KEY). Local media uploads cannot be uploaded to Storage until configured; use a public HTTPS image/video URL instead.',
     category: 'Category',
     visibility: 'Visibility',
     statusLabel: 'Publishing Status',
@@ -192,7 +205,12 @@ export const en = {
     unlockSuccess: 'Payment Verified! Enjoy full stream access.',
     alreadyPurchased: 'You have permanently unlocked this stream.',
     proBadge: 'PRO',
-    freeBadge: 'FREE'
+    freeBadge: 'FREE',
+    pendingVerification: 'Pending Admin Verification',
+    pendingVerificationDesc: 'Your Telebirr transaction reference has been submitted and is awaiting staff approval.',
+    reportVideo: 'Report Video',
+    reportReason: 'Reason for reporting this stream',
+    reportSubmitted: 'Report submitted to the Moderation team.'
   },
 
   // Downloads Library
@@ -270,5 +288,126 @@ export const en = {
       pro_user: 'Pro User',
       free_user: 'Free User'
     }
+  },
+
+  // Trending 24h Real-Time Analytics View
+  trendingView: {
+    title: 'Trending',
+    subtitle: 'Most watched and interacted streams over the last 24 hours',
+    realtimeBadge: 'Last 24 hours · Live ranking',
+    sortEngagement: 'Top Engagement',
+    sortViews: 'Most Watched (24h)',
+    sortGrowth: 'Fastest Growing',
+    sortInteractions: 'Most Interacted',
+    kpiViews24h: '24h Views',
+    kpiInteractions24h: '24h Interactions',
+    kpiPeakGrowth: 'Peak 24h Growth',
+    kpiActiveStreams: 'Trending Streams',
+    views24hLabel: 'views (24h)',
+    interactions24hLabel: 'interactions',
+    growthLabel: 'growth',
+    engagementScore: 'Engagement Score',
+    watchNow: 'Watch Now',
+    noTrending: 'No trending streams match this category in the last 24 hours.',
+    resetFilter: 'Show All Categories'
+  },
+
+  // Live Reactions on Video Player
+  liveReactions: {
+    title: 'Live Reactions',
+    subtitle: 'Send real-time reactions during playback',
+    toggleOn: 'Hide floating reactions',
+    toggleOff: 'Show floating reactions',
+    totalReactions: 'reactions',
+    justReacted: 'reacted'
+  },
+
+  // Access Filters (All / Free Only / Premium Only)
+  filters: {
+    allContent: 'All',
+    freeOnly: 'Free Only',
+    premiumOnly: 'Premium Only',
+    allVideosAndPro: 'Including Free & PRO',
+    noFilteredVideos: 'No videos match this filter combination.',
+    resetFilters: 'Reset Filters'
+  },
+
+  // Authentication & Role-Based Onboarding
+  auth: {
+    signIn: 'Sign In',
+    signUp: 'Sign Up',
+    createAccount: 'Create Account',
+    welcomeBack: 'Welcome back to SVTech Media',
+    joinPlatform: 'Join SVTech Media',
+    subtitleSignIn: 'Real-time authenticated access to your streams, purchases, and studio.',
+    subtitleSignUp: 'Choose your role and start watching, unlocking PRO streams, or publishing content.',
+    continueWithGoogle: 'Continue with Google',
+    orWithEmail: 'Or continue with email',
+    fullName: 'Display Name',
+    emailLabel: 'Email Address',
+    passwordLabel: 'Password',
+    chooseRole: 'Select Account Role',
+    roleFreeTitle: 'Free Viewer',
+    roleFreeDesc: 'Watch all free streams, react live, and comment',
+    roleProTitle: 'Pro Member',
+    roleProDesc: 'Unlock premium PRO courses and HD downloads',
+    roleCreatorTitle: 'Creator',
+    roleCreatorDesc: 'Publish posts with custom covers, titles & ETB pricing',
+    signInBtn: 'Sign In to Account',
+    signUpBtn: 'Create Authenticated Account',
+    switchToSignUp: "Don't have an account? Sign Up",
+    switchToSignIn: 'Already have an account? Sign In',
+    authenticatedStatus: 'Real-time Firebase Auth active',
+    forgotPassword: 'Forgot password?',
+    resetTitle: 'Reset Your Password',
+    resetDesc: 'Enter your account email and we will send you a password reset link.',
+    sendResetBtn: 'Send Reset Link',
+    resetSent: 'Password reset link sent to your email!',
+    verifyTitle: 'Verify Your Email Address',
+    verifyDesc: 'Please verify your email to unlock full creator publishing and purchase tracking.',
+    resendVerification: 'Resend Verification Email',
+    verificationSent: 'Verification email dispatched! Check your inbox.',
+    checkVerifiedBtn: 'I Have Verified My Email',
+    unauthorizedTitle: 'Access Restricted',
+    unauthorizedDesc: 'Your current account role does not have permission to view this workspace.',
+    backHome: 'Back to Home',
+    requestCreatorAccess: 'Request Creator Studio Access',
+    requestCreatorDesc: 'Optional: submit your channel profile for Admin approval while keeping secure viewer defaults.',
+    channelNameLabel: 'Proposed Channel Name',
+    bioLabel: 'Creator Bio / Focus'
+  },
+
+  channel: {
+    communityTab: 'Community',
+    postPlaceholder: 'Share an update, announcement, or poll with your subscribers...',
+    publishPost: 'Publish Post',
+    editChannel: 'Edit Channel',
+    saveProfile: 'Save Profile'
+  },
+
+  creatorStudio: {
+    title: 'SVTech Creator Studio',
+    subtitle: 'Manage your channel uploads, viewer engagement, and verified PRO earnings',
+    applyTitle: 'Apply to Become an SVTech Creator',
+    applyDesc: 'Submit your channel proposal for Admin approval so you can publish streams and monetize PRO content.',
+    applyBtn: 'Submit Creator Application',
+    pendingReview: 'Your Creator Studio application is pending Admin review.',
+    rejectedNotice: 'Your previous creator application was not approved. You may update details and reapply.',
+    totalViews: 'Channel Views',
+    totalLikes: 'Channel Likes',
+    verifiedRevenue: 'Verified PRO Revenue',
+    myCatalog: 'My Video Catalog',
+    viewChannel: 'View Public Channel'
+  },
+
+  moderatorStudio: {
+    title: 'SVTech Trust & Safety — Moderator Studio',
+    subtitle: 'Review community safety reports and moderate live comments',
+    reportsQueue: 'Reports Queue',
+    commentsQueue: 'Comments Moderation',
+    resolveBtn: 'Resolve',
+    dismissBtn: 'Dismiss',
+    flagBtn: 'Flag',
+    restoreBtn: 'Restore'
   }
 };

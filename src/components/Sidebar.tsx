@@ -51,6 +51,8 @@ export const Sidebar: React.FC = () => {
     isAdmin,
     isModerator,
     isCreator,
+    isAuthenticated,
+    platformSettings,
     setIsUploadModalOpen,
     setAdminActiveTab,
     t,
@@ -67,6 +69,7 @@ export const Sidebar: React.FC = () => {
   // Mini rail items for collapsed state on desktop (w-[72px])
   const miniRailItems = [
     { mode: 'home' as const, label: t.nav.home, icon: Home },
+    { mode: 'trending' as const, label: t.nav.trending, icon: Flame },
     { mode: 'shorts' as const, label: t.nav.shorts, icon: PlaySquare },
     { mode: 'subscriptions' as const, label: t.nav.subscriptions, icon: Tv },
     { mode: 'history' as const, label: t.nav.you, icon: History },
@@ -205,10 +208,14 @@ export const Sidebar: React.FC = () => {
               </button>
 
               <button
-                onClick={() => handleNavClick('home')}
-                className="w-full flex items-center gap-5 px-3 py-2.5 rounded-xl text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100/70 dark:hover:bg-zinc-800/60 transition-colors"
+                onClick={() => handleNavClick('trending')}
+                className={`w-full flex items-center gap-5 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${
+                  viewMode === 'trending'
+                    ? 'bg-zinc-100 dark:bg-zinc-800 font-semibold text-zinc-950 dark:text-white'
+                    : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100/70 dark:hover:bg-zinc-800/60'
+                }`}
               >
-                <Flame className="w-5 h-5 text-orange-500" />
+                <Flame className={`w-5 h-5 ${viewMode === 'trending' ? 'text-rose-600' : 'text-orange-500'}`} />
                 <span>{t.nav.trending}</span>
               </button>
 
@@ -355,23 +362,44 @@ export const Sidebar: React.FC = () => {
               {creatorOpen && (
                 <div className="mt-1 space-y-0.5">
                   <button
-                    onClick={() => handleNavClick('your-videos')}
+                    onClick={() => handleNavClick('creator-dashboard')}
                     className={`w-full flex items-center gap-4 px-3 py-2 rounded-xl text-xs font-medium transition-colors ${
-                      viewMode === 'your-videos'
+                      viewMode === 'creator-dashboard' || viewMode === 'your-videos'
                         ? 'bg-zinc-100 dark:bg-zinc-800 font-semibold text-zinc-950 dark:text-white'
                         : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100/70 dark:hover:bg-zinc-800/60'
                     }`}
                   >
                     <FileVideo className="w-4 h-4 text-zinc-500" />
-                    <span>{t.nav.myVideos}</span>
+                    <span>{isCreator ? t.nav.myVideos : t.creatorStudio.applyTitle}</span>
                   </button>
 
+                  {isModerator && (
+                    <button
+                      onClick={() => handleNavClick('moderator-dashboard')}
+                      className={`w-full flex items-center gap-4 px-3 py-2 rounded-xl text-xs font-medium transition-colors ${
+                        viewMode === 'moderator-dashboard'
+                          ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 font-semibold'
+                          : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100/70 dark:hover:bg-zinc-800/60'
+                      }`}
+                    >
+                      <ShieldCheck className="w-4 h-4 text-amber-500" />
+                      <span>{t.nav.moderatorCenter}</span>
+                    </button>
+                  )}
+
                   <button
-                    onClick={() => setIsUploadModalOpen(true)}
+                    onClick={() =>
+                      isAuthenticated ? setIsUploadModalOpen(true) : handleNavClick('signin')
+                    }
                     className="w-full flex items-center gap-4 px-3 py-2 rounded-xl text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors"
                   >
                     <Upload className="w-4 h-4" />
-                    <span>{t.nav.uploadVideo} (100 ETB)</span>
+                    <span>
+                      {t.nav.uploadVideo}
+                      {!isAdmin && !isModerator
+                        ? ` (${platformSettings.publishingFeeETB || 100} ETB)`
+                        : ''}
+                    </span>
                   </button>
                 </div>
               )}
@@ -523,7 +551,12 @@ export const Sidebar: React.FC = () => {
                 {subscribedChannels.map(channel => (
                   <button
                     key={channel.id}
-                    onClick={() => handleNavClick('channel')}
+                    onClick={() => {
+                      navigate('channel', { channelId: channel.id });
+                      if (window.innerWidth < 1024) {
+                        setSidebarOpen(false);
+                      }
+                    }}
                     className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100/70 dark:hover:bg-zinc-800/60 transition-colors"
                   >
                     <div className="flex items-center gap-3 min-w-0">

@@ -25,6 +25,7 @@ export const am = {
     analytics: 'አናሊቲክስ',
     creatorStudio: 'ፈጣሪ ስቱዲዮ',
     adminCenter: 'የአስተዳዳሪ ማዕከል',
+    moderatorCenter: 'የተቆጣጣሪ ማዕከል',
     videoManagement: 'የቪዲዮ አስተዳደር',
     userManagement: 'የተጠቃሚዎች አስተዳደር',
     moderation: 'የይዘት ቁጥጥር',
@@ -33,6 +34,10 @@ export const am = {
     platformSettings: 'የመድረክ ቅንብሮች',
     allSubscriptions: 'ሁሉም ምዝገባዎች',
     noSubscriptions: 'እስካሁን ምንም ምዝገባ የለም።'
+  },
+
+  home: {
+    continueWatching: 'መመልከትዎን ይቀጥሉ'
   },
 
   // Explore categories
@@ -124,8 +129,16 @@ export const am = {
     chooseLocalFile: 'ከኮምፒውተርዎ ቪዲዮ ይምረጡ',
     urlPlaceholder: 'https://...',
     samplePresets: 'ምሳሌዎች',
-    thumbnail: 'የቪዲዮ ማሳያ ምስል (Thumbnail)',
-    uploadImage: 'ምስል ይጫኑ',
+    thumbnail: 'የቪዲዮ ማሳያ ምስል (16:9 ሽፋን)',
+    uploadImage: 'JPG / PNG / WebP ይጫኑ',
+    extractFrame: 'ከቪዲዮው ምስል ይውሰዱ',
+    capturingFrame: '16:9 ምስል በመውሰድ ላይ...',
+    frameTimestamp: 'የምስል ሰዓት (Timestamp)',
+    captureAtTimestamp: 'ምስሉን ያንሱ',
+    verifyUrl: 'ሊንክ አረጋግጥ',
+    urlVerified: 'ምስሉ ተረጋግጧል',
+    removeThumbnail: 'ሽፋኑን አጥፋ',
+    storageNotConfiguredNotice: 'በዚህ አካባቢ Firebase Storage አልተዋቀረም (VITE_FIREBASE_API_KEY ይጎድላል)። የኮምፒውተር ፋይሎችን ወደ Storage ለመጫን መጀመሪያ ያዋቅሩ ወይም ትክክለኛ የHTTPS ሊንክ ይጠቀሙ።',
     category: 'ምድብ',
     visibility: 'ተደራሽነት',
     statusLabel: 'የህትመት ሁኔታ',
@@ -192,7 +205,12 @@ export const am = {
     unlockSuccess: 'ክፍያ ተረጋግጧል! ቪዲዮው ሙሉ በሙሉ ተከፍቷል።',
     alreadyPurchased: 'ይህንን ቪዲዮ ቀደም ሲል ገዝተው ከፍተዋል።',
     proBadge: 'ፕሮ',
-    freeBadge: 'ነፃ'
+    freeBadge: 'ነፃ',
+    pendingVerification: 'የአስተዳዳሪ ማረጋገጫ በመጠባበቅ ላይ',
+    pendingVerificationDesc: 'የቴሌብር የክፍያ መለያ ቁጥርዎ ተልኳል እና የአስተዳዳሪ ማረጋገጫ እየጠበቀ ነው።',
+    reportVideo: 'ቪዲዮውን ሪፖርት አድርግ',
+    reportReason: 'ይህንን ቪዲዮ ሪፖርት የሚያደርጉበት ምክንያት',
+    reportSubmitted: 'ሪፖርትዎ ለይዘት ቁጥጥር ቡድን ተልኳል።'
   },
 
   // Downloads Library
@@ -270,5 +288,126 @@ export const am = {
       pro_user: 'ፕሮ ተጠቃሚ',
       free_user: 'ነፃ ተጠቃሚ'
     }
+  },
+
+  // Trending 24h Real-Time Analytics View
+  trendingView: {
+    title: 'በብዛት የታዩ (Trending)',
+    subtitle: 'ባለፉት 24 ሰዓታት በብዛት የታዩ እና ተሳትፎ ያገኙ ቪዲዮዎች',
+    realtimeBadge: 'ያለፉት 24 ሰዓታት · የቀጥታ ደረጃ',
+    sortEngagement: 'ከፍተኛ ተሳትፎ',
+    sortViews: 'በብዛት የታዩ (24ሰ)',
+    sortGrowth: 'ፈጣን እድገት',
+    sortInteractions: 'ብዙ መስተጋብር',
+    kpiViews24h: 'የ24ሰ ዕይታዎች',
+    kpiInteractions24h: 'የ24ሰ መስተጋብሮች',
+    kpiPeakGrowth: 'ከፍተኛ የ24ሰ እድገት',
+    kpiActiveStreams: 'ታዋቂ ቪዲዮዎች',
+    views24hLabel: 'ዕይታ (24ሰ)',
+    interactions24hLabel: 'መስተጋብር',
+    growthLabel: 'እድገት',
+    engagementScore: 'የተሳትፎ ነጥብ',
+    watchNow: 'አሁን ይመልከቱ',
+    noTrending: 'በዚህ ምድብ ውስጥ ባለፉት 24 ሰዓታት ታዋቂ ቪዲዮ አልተገኘም።',
+    resetFilter: 'ሁሉንም ምድቦች አሳይ'
+  },
+
+  // Live Reactions on Video Player
+  liveReactions: {
+    title: 'የቀጥታ ስሜት መግለጫዎች',
+    subtitle: 'ቪዲዮው በሚጫወትበት ጊዜ በቀጥታ ስሜትዎን ይላኩ',
+    toggleOn: 'ተንሳፋፊ ስሜቶችን ደብቅ',
+    toggleOff: 'ተንሳፋፊ ስሜቶችን አሳይ',
+    totalReactions: 'ስሜቶች',
+    justReacted: 'ልኳል'
+  },
+
+  // Access Filters (All / Free Only / Premium Only)
+  filters: {
+    allContent: 'ሁሉም',
+    freeOnly: 'ነፃ ብቻ',
+    premiumOnly: 'ፕሪሚየም ብቻ',
+    allVideosAndPro: 'ነፃ እና ፕሪሚየም',
+    noFilteredVideos: 'ከዚህ ማጣሪያ ጋር የሚዛመድ ቪዲዮ አልተገኘም።',
+    resetFilters: 'ማጣሪያዎችን ዳግም አስጀምር'
+  },
+
+  // Authentication & Role-Based Onboarding
+  auth: {
+    signIn: 'ይግቡ',
+    signUp: 'ይመዝገቡ',
+    createAccount: 'መለያ ይፍጠሩ',
+    welcomeBack: 'ወደ ኤስቪቴክ ሚዲያ እንኳን በደህና መጡ',
+    joinPlatform: 'ኤስቪቴክ ሚዲያን ይቀላቀሉ',
+    subtitleSignIn: 'ቪዲዮዎችዎን፣ ግዢዎችዎን እና ስቱዲዮዎን በቀጥታ ማረጋገጫ ይድረሱ።',
+    subtitleSignUp: 'የመለያ ሚናዎን ይምረጡ እና መመልከት ወይም ይዘት መፍጠር ይጀምሩ።',
+    continueWithGoogle: 'በጉግል ይቀጥሉ',
+    orWithEmail: 'ወይም በኢሜይል ይቀጥሉ',
+    fullName: 'የማሳያ ስም',
+    emailLabel: 'ኢሜይል አድራሻ',
+    passwordLabel: 'የይለፍ ቃል',
+    chooseRole: 'የመለያ ሚና ይምረጡ',
+    roleFreeTitle: 'ነፃ ተመልካች',
+    roleFreeDesc: 'ሁሉንም ነፃ ቪዲዮዎች ይመልከቱ እና አስተያየት ይስጡ',
+    roleProTitle: 'ፕሮ አባል',
+    roleProDesc: 'ፕሪሚየም ቪዲዮዎችን ይክፈቱ እና በHD ያውርዱ',
+    roleCreatorTitle: 'ይዘት ፈጣሪ',
+    roleCreatorDesc: 'ሽፋን፣ ርዕስ እና የብር ዋጋ በማስቀመጥ ቪዲዮ ያትሙ',
+    signInBtn: 'ወደ መለያ ይግቡ',
+    signUpBtn: 'አዲስ መለያ ይፍጠሩ',
+    switchToSignUp: 'መለያ የለዎትም? ይመዝገቡ',
+    switchToSignIn: 'አስቀድመው መለያ አለዎት? ይግቡ',
+    authenticatedStatus: 'የቀጥታ Firebase ማረጋገጫ ንቁ ነው',
+    forgotPassword: 'የይለፍ ቃል ረስተዋል?',
+    resetTitle: 'የይለፍ ቃልዎን ዳግም ያስጀምሩ',
+    resetDesc: 'የይለፍ ቃል ማስጀመሪያ ሊንክ እንድንልክልዎ የመለያ ኢሜይልዎን ያስገቡ።',
+    sendResetBtn: 'የማስጀመሪያ ሊንክ ላክ',
+    resetSent: 'የይለፍ ቃል ማስጀመሪያ ሊንክ ወደ ኢሜይልዎ ተልኳል!',
+    verifyTitle: 'የኢሜይል አድራሻዎን ያረጋግጡ',
+    verifyDesc: 'ሙሉ የይዘት ፈጣሪ አገልግሎቶችን እና ግዢዎችን ለመጠቀም እባክዎ ኢሜይልዎን ያረጋግጡ።',
+    resendVerification: 'የማረጋገጫ ኢሜይል እንደገና ላክ',
+    verificationSent: 'የማረጋገጫ ኢሜይል ተልኳል! እባክዎ የገቢ መልዕክትዎን ይመልከቱ።',
+    checkVerifiedBtn: 'ኢሜይሌን አረጋግጫለሁ',
+    unauthorizedTitle: 'መዳረሻ የተገደበ ነው',
+    unauthorizedDesc: 'የአሁኑ የመለያ ሚናዎ ይህንን ገጽ ለመክፈት ፈቃድ የለውም።',
+    backHome: 'ወደ መነሻ ተመለስ',
+    requestCreatorAccess: 'የፈጣሪ ስቱዲዮ ፈቃድ ይጠይቁ',
+    requestCreatorDesc: 'አማራጭ፡ መለያዎ በነፃ ተመልካችነት ሆኖ የቻናል ማመልከቻዎን ለአስተዳዳሪ ማረጋገጫ ይላኩ።',
+    channelNameLabel: 'የታሰበው የቻናል ስም',
+    bioLabel: 'የፈጣሪ መግለጫ / ትኩረት'
+  },
+
+  channel: {
+    communityTab: 'ማህበረሰብ',
+    postPlaceholder: 'ለተመዝጋቢዎችዎ መልዕክት ወይም ዜና ያጋሩ...',
+    publishPost: 'ልጥፍ አትም',
+    editChannel: 'ቻናል አርትዕ',
+    saveProfile: 'መገለጫ አስቀምጥ'
+  },
+
+  creatorStudio: {
+    title: 'ኤስቪቴክ ፈጣሪ ስቱዲዮ',
+    subtitle: 'የቻናልዎን ቪዲዮዎች፣ የተመልካች ተሳትፎ እና የተረጋገጠ ፕሮ ገቢ ያስተዳድሩ',
+    applyTitle: 'የኤስቪቴክ ይዘት ፈጣሪ ለመሆን ያመልክቱ',
+    applyDesc: 'ቪዲዮዎችን ለማተም እና የፕሮ ይዘቶችን ለመሸጥ የቻናል ማመልከቻዎን ለአስተዳዳሪ ማረጋገጫ ይላኩ።',
+    applyBtn: 'የፈጣሪ ማመልከቻ ላክ',
+    pendingReview: 'የፈጣሪ ስቱዲዮ ማመልከቻዎ በአስተዳዳሪ እይታ ላይ ነው።',
+    rejectedNotice: 'የቀድሞው የፈጣሪ ማመልከቻዎ አልጸደቀም። መረጃውን አስተካክለው እንደገና ማመልከት ይችላሉ።',
+    totalViews: 'የቻናል ዕይታዎች',
+    totalLikes: 'የቻናል ላይኮች',
+    verifiedRevenue: 'የተረጋገጠ ፕሮ ገቢ',
+    myCatalog: 'የእኔ ቪዲዮዎች ዝርዝር',
+    viewChannel: 'ይፋዊ ቻናል ይመልከቱ'
+  },
+
+  moderatorStudio: {
+    title: 'ኤስቪቴክ ደህንነት — የተቆጣጣሪ ስቱዲዮ',
+    subtitle: 'የማህበረሰብ ሪፖርቶችን ይገምግሙ እና አስተያየቶችን ይቆጣጠሩ',
+    reportsQueue: 'የሪፖርቶች ዝርዝር',
+    commentsQueue: 'የአስተያየቶች ቁጥጥር',
+    resolveBtn: 'ፍታ',
+    dismissBtn: 'ሰርዝ',
+    flagBtn: 'ጠቁም',
+    restoreBtn: 'መልስ'
   }
 };

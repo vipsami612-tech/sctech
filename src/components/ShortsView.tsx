@@ -16,26 +16,44 @@ import {
   Check
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { ShortComment } from '../types';
+import { addShortCommentInFirestore, subscribeToShortComments } from '../services/postService';
 
 export const ShortsView: React.FC = () => {
-  const { shorts, toggleSubscribe, subscribedChannelIds, navigate } = useApp();
+  const {
+    shorts,
+    toggleSubscribe,
+    subscribedChannelIds,
+    navigate,
+    likeShort,
+    currentUser,
+    userProfile,
+    openAuthModal,
+    showToast,
+    t
+  } = useApp();
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(true);
   const [isMuted, setIsMuted] = useState(false);
   const [likedShorts, setLikedShorts] = useState<string[]>([]);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [commentInput, setCommentInput] = useState('');
-  const [shortComments, setShortComments] = useState<Record<string, { author: string; text: string; time: string }[]>>({
-    'short-1': [
-      { author: 'DevNinja', text: 'This flexbox trick saved my entire sprint layout!', time: '1h ago' },
-      { author: 'CoderPro', text: 'Clean syntax! Keep dropping these 30s nuggets.', time: '3h ago' }
-    ]
-  });
+  const [shortComments, setShortComments] = useState<ShortComment[]>([]);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const currentShort = shorts[currentIndex] || shorts[0];
-  const isSubscribed = subscribedChannelIds.includes(currentShort.channel.id);
-  const isLiked = likedShorts.includes(currentShort.id);
+
+  // Real-time Firestore listener for comments on current short
+  useEffect(() => {
+    if (!currentShort?.id) {
+      setShortComments([]);
+      return;
+    }
+    const unsub = subscribeToShortComments(currentShort.id, items => {
+      setShortComments(items);
+    });
+    return () => unsub();
+  }, [currentShort?.id]);
 
   // Restart and play whenever index changes
   useEffect(() => {
@@ -69,29 +87,6 @@ export const ShortsView: React.FC = () => {
     }
   };
 
-  const toggleLike = () => {
-    if (isLiked) {
-      setLikedShorts(prev => prev.filter(id => id !== currentShort.id));
-    } else {
-      setLikedShorts(prev => [...prev, currentShort.id]);
-    }
-  };
-
-  const handleAddComment = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!commentInput.trim()) return;
-    const newC = {
-      author: 'You',
-      text: commentInput.trim(),
-      time: 'Just now'
-    };
-    setShortComments(prev => ({
-      ...prev,
-      [currentShort.id]: [newC, ...(prev[currentShort.id] || [])]
-    }));
-    setCommentInput('');
-  };
-
   // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -109,7 +104,45 @@ export const ShortsView: React.FC = () => {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentIndex, isPlaying]);
+  }, [currentIndex, isPlaying, shorts.length]);
+
+  if (!currentShort) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center p-6 text-center text-zinc-500 text-sm">
+        No SVTech Shorts available yet.
+      </div>
+    );
+  }
+
+  const isSubscribed = subscribedChannelIds.includes(currentShort.channel.id);
+  const isLiked = likedShorts.includes(currentShort.id);
+
+  const toggleLike = () => {
+    if (isLiked) {
+      setLikedShorts(prev => prev.filter(id => id !== currentShort.id));
+    } else {
+      setLikedShorts(prev => [...prev, currentShort.id]);
+      likeShort(currentShort.id);
+    }
+  };
+
+  const handleAddComment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!commentInput.trim()) return;
+    if (!currentUser) {
+      openAuthModal('signin');
+      return;
+    }
+    const text = commentInput.trim();
+    setCommentInput('');
+    await addShortCommentInFirestore({
+      shortId: currentShort.id,
+      userId: currentUser.uid,
+      userName: userProfile.displayName || 'Viewer',
+      userAvatar: userProfile.photoURL,
+      text
+    });
+  };
 
   return (
     <div className="flex justify-center items-center py-4 px-2 min-h-[calc(100vh-4rem)] relative">
@@ -236,7 +269,9 @@ export const ShortsView: React.FC = () => {
             >
               <MessageSquare className="w-5 h-5" />
             </button>
-            <span className="text-[11px] font-mono">{currentShort.commentsCount}</span>
+            <span className="text-[11px] font-mono">
+              {Math.max(currentShort.commentsCount, shortComments.length)}
+            </span>
           </div>
 
           {/* Share button */}
@@ -244,6 +279,7 @@ export const ShortsView: React.FC = () => {
             <button
               onClick={() => {
                 navigator.clipboard?.writeText(window.location.href);
+                showToast(t.common.copied, 'success');
               }}
               className="p-3 rounded-full bg-black/40 hover:bg-black/70 backdrop-blur-md transition-all"
             >
@@ -268,7 +304,7 @@ export const ShortsView: React.FC = () => {
           <div className="absolute inset-x-0 bottom-0 top-1/3 bg-zinc-900/98 backdrop-blur-md rounded-t-3xl p-4 z-30 flex flex-col border-t border-zinc-700 animate-in slide-in-from-bottom">
             <div className="flex items-center justify-between pb-2 border-b border-zinc-800">
               <span className="text-xs font-semibold text-white">
-                Comments ({shortComments[currentShort.id]?.length || 0})
+                Comments ({shortComments.length})
               </span>
               <button
                 onClick={() => setCommentsOpen(false)}
@@ -280,13 +316,20 @@ export const ShortsView: React.FC = () => {
 
             {/* List */}
             <div className="flex-1 overflow-y-auto py-2 space-y-3">
-              {(shortComments[currentShort.id] || []).map((c, i) => (
-                <div key={i} className="text-xs">
-                  <span className="font-semibold text-zinc-300">{c.author}</span>
-                  <span className="text-zinc-500 text-[10px] ml-2">{c.time}</span>
+              {shortComments.map(c => (
+                <div key={c.id} className="text-xs">
+                  <span className="font-semibold text-zinc-300">{c.userName}</span>
+                  <span className="text-zinc-500 text-[10px] ml-2">
+                    {new Date(c.createdAt).toLocaleDateString()}
+                  </span>
                   <p className="text-zinc-200 mt-0.5">{c.text}</p>
                 </div>
               ))}
+              {shortComments.length === 0 && (
+                <p className="text-xs text-zinc-500 py-4 text-center">
+                  No comments yet. Be the first to comment!
+                </p>
+              )}
             </div>
 
             {/* Add input */}

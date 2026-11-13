@@ -18,6 +18,9 @@
         "dislikes": { "type": "number" },
         "status": { "type": "string", "enum": ["published", "draft", "scheduled", "unlisted"] },
         "visibility": { "type": "string", "enum": ["public", "private", "unlisted"] },
+        "accessType": { "type": "string", "enum": ["free", "pro", "private", "unlisted"] },
+        "price": { "type": "number" },
+        "currency": { "type": "string", "enum": ["ETB"] },
         "isFeatured": { "type": "boolean" },
         "ownerUid": { "type": "string", "maxLength": 128 },
         "createdAt": { "type": "string" },
@@ -45,6 +48,23 @@
       },
       "required": ["name", "handle"]
     },
+    "communityPost": {
+      "title": "CommunityPost",
+      "description": "Creator community announcement or discussion post on a channel",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "channelId": { "type": "string" },
+        "authorUid": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorAvatarUrl": { "type": "string" },
+        "text": { "type": "string", "maxLength": 3000 },
+        "imageUrl": { "type": "string" },
+        "likes": { "type": "number" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["channelId", "authorUid", "text", "createdAt"]
+    },
     "short": {
       "title": "Short",
       "description": "Vertical 9:16 short form video on SVTech Media",
@@ -62,20 +82,31 @@
       },
       "required": ["title", "videoUrl", "channelId"]
     },
+    "shortComment": {
+      "title": "ShortComment",
+      "description": "Real-time comment on a short reel",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "shortId": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "text": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["shortId", "userId", "text", "createdAt"]
+    },
     "comment": {
       "title": "Comment",
-      "description": "User comment on a video or short",
+      "description": "User comment on a video",
       "type": "object",
       "properties": {
         "videoId": { "type": "string", "maxLength": 128 },
-        "userId": { "type": "string", "maxLength": 128 },
-        "userName": { "type": "string", "maxLength": 100 },
-        "userAvatar": { "type": "string", "maxLength": 1000 },
         "text": { "type": "string", "maxLength": 2000 },
         "likes": { "type": "number" },
         "status": { "type": "string", "enum": ["active", "flagged", "removed"] }
       },
-      "required": ["videoId", "userId", "text"]
+      "required": ["videoId", "text"]
     },
     "user": {
       "title": "User",
@@ -85,10 +116,77 @@
         "email": { "type": "string", "maxLength": 255 },
         "displayName": { "type": "string", "maxLength": 100 },
         "photoURL": { "type": "string", "maxLength": 1000 },
-        "role": { "type": "string", "enum": ["super_admin", "admin", "moderator", "creator", "user"] },
-        "channelId": { "type": "string", "maxLength": 128 }
+        "role": { "type": "string", "enum": ["super_admin", "admin", "moderator", "creator", "pro_user", "free_user"] },
+        "channelId": { "type": "string", "maxLength": 128 },
+        "isBanned": { "type": "boolean" },
+        "creatorStatus": { "type": "string", "enum": ["none", "pending", "approved", "rejected"] }
       },
       "required": ["email", "role"]
+    },
+    "creatorApplication": {
+      "title": "CreatorApplication",
+      "description": "Creator onboarding request awaiting Admin review",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "channelName": { "type": "string" },
+        "channelHandle": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["uid", "email", "channelName", "status"]
+    },
+    "watchHistory": {
+      "title": "WatchHistory",
+      "description": "Per-user persisted playback progress",
+      "type": "object",
+      "properties": {
+        "videoId": { "type": "string" },
+        "progressPercent": { "type": "number" },
+        "lastPositionSec": { "type": "number" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["videoId", "progressPercent", "updatedAt"]
+    },
+    "videoPurchase": {
+      "title": "VideoPurchase",
+      "description": "Telebirr PRO video unlock submission & verification record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "videoId": { "type": "string" },
+        "amount": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "verified", "failed", "refunded"] },
+        "paymentStatus": { "type": "string", "enum": ["pending", "successful", "failed", "refunded"] }
+      },
+      "required": ["userId", "videoId", "amount", "status"]
+    },
+    "transaction": {
+      "title": "PaymentTransaction",
+      "description": "Ethiopian Birr publishing fee transaction",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "amount": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "processing", "successful", "failed", "cancelled", "refunded"] }
+      },
+      "required": ["userId", "amount", "status"]
+    },
+    "category": {
+      "title": "Category",
+      "description": "Video feed category chip",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "nameAm": { "type": "string" },
+        "slug": { "type": "string" }
+      },
+      "required": ["id", "name", "slug"]
     },
     "playlist": {
       "title": "Playlist",
@@ -111,7 +209,6 @@
         "targetType": { "type": "string", "enum": ["video", "comment", "channel"] },
         "targetId": { "type": "string", "maxLength": 128 },
         "reason": { "type": "string", "maxLength": 500 },
-        "reporterId": { "type": "string", "maxLength": 128 },
         "status": { "type": "string", "enum": ["pending", "resolved", "dismissed"] }
       },
       "required": ["targetType", "targetId", "reason", "status"]
@@ -121,47 +218,60 @@
       "description": "Audit trail log for platform events and admin actions",
       "type": "object",
       "properties": {
-        "adminId": { "type": "string", "maxLength": 128 },
         "adminEmail": { "type": "string", "maxLength": 255 },
         "action": { "type": "string", "maxLength": 100 },
         "details": { "type": "string", "maxLength": 1000 },
         "timestamp": { "type": "string" }
       },
       "required": ["action", "details"]
+    },
+    "liveReaction": {
+      "title": "LiveReaction",
+      "description": "Real-time floating emoji reaction sent during video playback",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "videoId": { "type": "string", "maxLength": 128 },
+        "emoji": { "type": "string", "maxLength": 16 },
+        "type": { "type": "string", "enum": ["heart", "fire", "clap", "laugh", "wow", "rocket"] },
+        "userId": { "type": "string", "maxLength": 128 },
+        "userName": { "type": "string", "maxLength": 100 },
+        "videoTime": { "type": "number" },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "videoId", "emoji", "type", "userId", "createdAt"]
+    },
+    "engagementEvent": {
+      "title": "EngagementEvent",
+      "description": "24-hour real-time engagement telemetry event for Trending analytics",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "videoId": { "type": "string", "maxLength": 128 },
+        "type": { "type": "string", "enum": ["view", "like", "comment", "reaction", "share"] },
+        "userId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["videoId", "type", "userId", "createdAt"]
     }
   },
   "firestore": {
-    "/videos/{videoId}": {
-      "schema": { "$ref": "#/entities/video" },
-      "description": "All public and creator video catalog"
-    },
-    "/channels/{channelId}": {
-      "schema": { "$ref": "#/entities/channel" },
-      "description": "Channel public profiles"
-    },
-    "/shorts/{shortId}": {
-      "schema": { "$ref": "#/entities/short" },
-      "description": "Short form video reel items"
-    },
-    "/comments/{commentId}": {
-      "schema": { "$ref": "#/entities/comment" },
-      "description": "Public comments on videos"
-    },
-    "/users/{userId}": {
-      "schema": { "$ref": "#/entities/user" },
-      "description": "User profiles and assigned role"
-    },
-    "/playlists/{playlistId}": {
-      "schema": { "$ref": "#/entities/playlist" },
-      "description": "Public and private playlists"
-    },
-    "/reports/{reportId}": {
-      "schema": { "$ref": "#/entities/report" },
-      "description": "Moderation reports queue"
-    },
-    "/activityLogs/{logId}": {
-      "schema": { "$ref": "#/entities/activityLog" },
-      "description": "Platform audit and activity logs"
-    }
+    "/videos/{videoId}": { "schema": { "$ref": "#/entities/video" } },
+    "/channels/{channelId}": { "schema": { "$ref": "#/entities/channel" } },
+    "/posts/{postId}": { "schema": { "$ref": "#/entities/communityPost" } },
+    "/shorts/{shortId}": { "schema": { "$ref": "#/entities/short" } },
+    "/shortComments/{commentId}": { "schema": { "$ref": "#/entities/shortComment" } },
+    "/comments/{commentId}": { "schema": { "$ref": "#/entities/comment" } },
+    "/users/{userId}": { "schema": { "$ref": "#/entities/user" } },
+    "/users/{userId}/watchHistory/{videoId}": { "schema": { "$ref": "#/entities/watchHistory" } },
+    "/creatorApplications/{appId}": { "schema": { "$ref": "#/entities/creatorApplication" } },
+    "/categories/{categoryId}": { "schema": { "$ref": "#/entities/category" } },
+    "/playlists/{playlistId}": { "schema": { "$ref": "#/entities/playlist" } },
+    "/reports/{reportId}": { "schema": { "$ref": "#/entities/report" } },
+    "/activityLogs/{logId}": { "schema": { "$ref": "#/entities/activityLog" } },
+    "/transactions/{transactionId}": { "schema": { "$ref": "#/entities/transaction" } },
+    "/videoPurchases/{purchaseId}": { "schema": { "$ref": "#/entities/videoPurchase" } },
+    "/liveReactions/{reactionId}": { "schema": { "$ref": "#/entities/liveReaction" } },
+    "/engagementEvents/{eventId}": { "schema": { "$ref": "#/entities/engagementEvent" } }
   }
 }

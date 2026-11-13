@@ -42,9 +42,12 @@ export const Header: React.FC = () => {
     setIsVoiceSearchModalOpen,
     videos,
     userProfile,
+    isAuthenticated,
+    emailVerified,
     isAdmin,
     isModerator,
-    signInWithGoogle,
+    isCreator,
+    openAuthModal,
     signOutUser,
     language,
     setLanguage,
@@ -266,8 +269,20 @@ export const Header: React.FC = () => {
           )}
         </div>
 
+        {/* Moderator Center Quick Button */}
+        {isModerator && !isAdmin && (
+          <button
+            onClick={() => navigate('moderator-dashboard')}
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full text-xs font-semibold bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/60 transition-colors"
+            title={t.nav.moderatorCenter}
+          >
+            <Shield className="w-3.5 h-3.5" />
+            <span className="hidden lg:inline">{t.nav.moderatorCenter}</span>
+          </button>
+        )}
+
         {/* Admin Command Center Quick Button */}
-        {(isAdmin || isModerator) && (
+        {isAdmin && (
           <button
             onClick={() => navigate('admin')}
             className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full text-xs font-semibold bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-900/60 transition-colors"
@@ -280,7 +295,7 @@ export const Header: React.FC = () => {
 
         {/* Create / Upload Video Button */}
         <button
-          onClick={() => setIsUploadModalOpen(true)}
+          onClick={() => (isAuthenticated ? setIsUploadModalOpen(true) : navigate('signin'))}
           className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full text-xs font-semibold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-100 transition-colors whitespace-nowrap shrink-0"
         >
           <VideoIcon className="w-4 h-4 text-rose-600" />
@@ -358,42 +373,76 @@ export const Header: React.FC = () => {
           )}
         </div>
 
+        {/* Sign In / Sign Up Buttons when unauthenticated */}
+        {!isAuthenticated && (
+          <div className="hidden sm:flex items-center gap-1.5">
+            <button
+              onClick={() => openAuthModal('signin')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-zinc-300 dark:border-zinc-700 text-zinc-800 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+            >
+              <LogIn className="w-3.5 h-3.5 text-rose-600" />
+              <span>{t.auth.signIn}</span>
+            </button>
+            <button
+              onClick={() => openAuthModal('signup')}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white shadow-sm transition-colors"
+            >
+              {t.auth.signUp}
+            </button>
+          </div>
+        )}
+
         {/* User Profile Avatar & Dropdown */}
         <div ref={userMenuRef} className="relative">
           <button
             onClick={() => setShowUserMenu(!showUserMenu)}
-            className="flex items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 rounded-full"
+            className="flex items-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 rounded-full"
+            aria-label="Account menu"
           >
-            <img
-              src={userProfile.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80'}
-              alt="User profile"
-              referrerPolicy="no-referrer"
-              className="w-7 h-7 sm:w-8 sm:h-8 rounded-full ring-2 ring-transparent hover:ring-rose-600 object-cover transition-all"
-            />
+            {userProfile.photoURL ? (
+              <img
+                src={userProfile.photoURL}
+                alt={userProfile.displayName}
+                referrerPolicy="no-referrer"
+                className="w-7 h-7 sm:w-8 sm:h-8 rounded-full ring-2 ring-transparent hover:ring-rose-600 object-cover transition-all"
+              />
+            ) : (
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-zinc-900 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 text-white text-xs font-bold flex items-center justify-center hover:ring-2 hover:ring-rose-600 transition-all">
+                {(userProfile.displayName || 'G').charAt(0).toUpperCase()}
+              </div>
+            )}
           </button>
 
           {showUserMenu && (
-            <div className="absolute right-0 top-12 w-64 bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl border border-zinc-200 dark:border-zinc-800 py-2 z-50 animate-in fade-in zoom-in-95">
+            <div className="absolute right-0 top-12 w-68 bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl border border-zinc-200 dark:border-zinc-800 py-2 z-50 animate-in fade-in zoom-in-95">
               <div className="flex items-center gap-3 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800">
-                <img
-                  src={userProfile.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80'}
-                  alt=""
-                  referrerPolicy="no-referrer"
-                  className="w-10 h-10 rounded-full object-cover"
-                />
+                {userProfile.photoURL ? (
+                  <img
+                    src={userProfile.photoURL}
+                    alt=""
+                    referrerPolicy="no-referrer"
+                    className="w-10 h-10 rounded-full object-cover shrink-0"
+                  />
+                ) : (
+                  <div className="w-10 h-10 rounded-full bg-zinc-900 dark:bg-zinc-800 border border-zinc-700 text-white text-sm font-bold flex items-center justify-center shrink-0">
+                    {(userProfile.displayName || 'G').charAt(0).toUpperCase()}
+                  </div>
+                )}
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 truncate">
                     {userProfile.displayName}
                   </p>
-                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-600 text-white uppercase inline-block">
-                    {userProfile.role.replace('_', ' ')}
+                  <span className="text-[10px] font-bold text-rose-600 dark:text-rose-400 uppercase tracking-wider inline-block">
+                    {isAuthenticated ? userProfile.role.replace('_', ' ') : 'Guest Viewer'}
                   </span>
-                  <p className="text-[11px] text-zinc-500 truncate mt-0.5">{userProfile.email}</p>
+                  <p className="text-[11px] text-zinc-500 truncate mt-0.5">
+                    {userProfile.email || 'Not signed in'}
+                  </p>
                 </div>
               </div>
 
               <div className="py-1">
-                {(isAdmin || isModerator) && (
+                {isAdmin && (
                   <button
                     onClick={() => {
                       setShowUserMenu(false);
@@ -406,15 +455,28 @@ export const Header: React.FC = () => {
                   </button>
                 )}
 
+                {isModerator && (
+                  <button
+                    onClick={() => {
+                      setShowUserMenu(false);
+                      navigate('moderator-dashboard');
+                    }}
+                    className="w-full flex items-center gap-3 px-4 py-2 text-xs font-semibold text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40 text-left"
+                  >
+                    <Shield className="w-4 h-4 text-amber-500" />
+                    {t.nav.moderatorCenter}
+                  </button>
+                )}
+
                 <button
                   onClick={() => {
                     setShowUserMenu(false);
-                    navigate('your-videos');
+                    navigate('creator-dashboard');
                   }}
                   className="w-full flex items-center gap-3 px-4 py-2 text-xs font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-left"
                 >
                   <FileVideo className="w-4 h-4 text-zinc-500" />
-                  {t.nav.myVideos}
+                  {isCreator ? t.nav.creatorStudio : t.creatorStudio.applyTitle}
                 </button>
 
                 <button
@@ -463,21 +525,70 @@ export const Header: React.FC = () => {
               </div>
 
               <div className="pt-1 border-t border-zinc-100 dark:border-zinc-800">
-                <button
-                  onClick={() => {
-                    setShowUserMenu(false);
-                    signInWithGoogle();
-                  }}
-                  className="w-full flex items-center gap-3 px-4 py-2 text-xs font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-left"
-                >
-                  <LogIn className="w-4 h-4 text-zinc-500" />
-                  {t.header.googleAuth}
-                </button>
+                {!isAuthenticated ? (
+                  <>
+                    <button
+                      onClick={() => {
+                        setShowUserMenu(false);
+                        openAuthModal('signin');
+                      }}
+                      className="w-full flex items-center gap-3 px-4 py-2 text-xs font-semibold text-zinc-800 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-left"
+                    >
+                      <LogIn className="w-4 h-4 text-rose-600" />
+                      {t.auth.signIn}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowUserMenu(false);
+                        openAuthModal('signup');
+                      }}
+                      className="w-full flex items-center gap-3 px-4 py-2 text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 text-left"
+                    >
+                      <User className="w-4 h-4 text-rose-600" />
+                      {t.auth.createAccount}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    {!emailVerified && (
+                      <button
+                        onClick={() => {
+                          setShowUserMenu(false);
+                          navigate('verify-email');
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-2 text-xs font-semibold text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30 text-left"
+                      >
+                        <Shield className="w-4 h-4 text-amber-500" />
+                        {t.auth.verifyTitle}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        setShowUserMenu(false);
+                        openAuthModal('signin');
+                      }}
+                      className="w-full flex items-center gap-3 px-4 py-2 text-xs font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-left"
+                    >
+                      <User className="w-4 h-4 text-emerald-500" />
+                      Account & Role Profile
+                    </button>
+                    <button
+                      onClick={async () => {
+                        setShowUserMenu(false);
+                        await signOutUser();
+                      }}
+                      className="w-full flex items-center gap-3 px-4 py-2 text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 text-left"
+                    >
+                      <LogOut className="w-4 h-4" />
+                      {t.header.signOut}
+                    </button>
+                  </>
+                )}
 
                 <div className="px-4 py-1.5 text-[11px] text-zinc-400 flex items-center justify-between">
-                  <span>Cloud Firestore</span>
-                  <span className="flex items-center gap-1 text-emerald-500 font-semibold">
-                    <Check className="w-3 h-3" /> {t.header.realtimeConnected}
+                  <span>Firebase Auth</span>
+                  <span className={`flex items-center gap-1 font-semibold ${isAuthenticated ? 'text-emerald-500' : 'text-zinc-400'}`}>
+                    <Check className="w-3 h-3" /> {isAuthenticated ? t.header.realtimeConnected : 'Guest Mode'}
                   </span>
                 </div>
               </div>

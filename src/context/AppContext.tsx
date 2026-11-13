@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Video,
   Channel,
@@ -18,7 +19,13 @@ import {
   PaymentTransaction,
   DownloadRecord,
   VideoPurchase,
-  VideoAccessType
+  VideoAccessType,
+  ReactionType,
+  LiveReaction,
+  EngagementEvent,
+  AccessFilter,
+  CommunityPost,
+  CreatorApplication
 } from '../types';
 import {
   INITIAL_VIDEOS,
@@ -26,8 +33,7 @@ import {
   INITIAL_SHORTS,
   INITIAL_PLAYLISTS,
   INITIAL_COMMENTS,
-  INITIAL_NOTIFICATIONS,
-  generateThumbnailSvg
+  INITIAL_NOTIFICATIONS
 } from '../data/mockData';
 import {
   auth,
@@ -49,6 +55,7 @@ import {
   subscribeToUsers,
   subscribeToPlatformSettings,
   subscribeToTransactions,
+  subscribeToUserTransactions,
   createOrUpdateVideo,
   deleteVideo,
   updateVideoStatus,
@@ -65,6 +72,10 @@ import {
   deleteComment,
   logPlatformActivity,
   updateUserRole,
+  updateUserBanStatus,
+  savePlaylistToFirestore,
+  deletePlaylistFromFirestore,
+  reviewCreatorApplicationInFirestore,
   fileReport,
   resolveReport,
   sendBroadcastNotification,
@@ -72,19 +83,61 @@ import {
   createPaymentTransaction,
   verifyAndCompletePayment,
   subscribeToVideoPurchases,
+  subscribeToUserVideoPurchases,
   recordVideoPurchase,
   verifyVideoPurchase,
   refundVideoPurchase,
-  updateVideoAccessType
+  updateVideoAccessType,
+  subscribeToEngagementEvents24h,
+  sendLiveReaction,
+  incrementVideoShares,
+  subscribeToUserProfile,
+  createOrSyncUserProfile
 } from '../services/videoService';
-import { onAuthStateChanged, signInWithPopup, signOut, User as FirebaseUser } from 'firebase/auth';
-import { getTranslations, en, am } from '../i18n';
+import {
+  subscribeToCommunityPosts,
+  createCommunityPostInFirestore,
+  toggleCommunityPostLikeInFirestore,
+  deleteCommunityPostInFirestore,
+  subscribeToCreatorApplications,
+  submitCreatorApplicationInFirestore,
+  subscribeToUserWatchHistory,
+  upsertUserWatchHistory,
+  removeUserWatchHistoryItem,
+  subscribeToCategories,
+  saveCategoryInFirestore,
+  deleteCategoryInFirestore
+} from '../services/postService';
+import {
+  hasPendingVideoPurchase,
+  isVideoPurchased,
+  mapPathToRouteState,
+  mapViewModeToPath
+} from '../services/domainHelpers';
+import {
+  onAuthStateChanged,
+  signInWithPopup,
+  signOut,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
+  sendEmailVerification,
+  updateProfile,
+  User as FirebaseUser
+} from 'firebase/auth';
+import { getTranslations, en } from '../i18n';
 
 interface MiniPlayerState {
   active: boolean;
   video: Video | null;
   isPlaying: boolean;
   currentTime: number;
+}
+
+export interface ToastNotification {
+  id: number;
+  type: 'success' | 'error' | 'info';
+  message: string;
 }
 
 interface AppContextType {
@@ -95,6 +148,7 @@ interface AppContextType {
   currentPlaylistId: string | null;
   searchQuery: string;
   activeCategory: string;
+  accessFilter: AccessFilter;
   adminActiveTab: string;
 
   // Language & i18n
@@ -108,14 +162,17 @@ interface AppContextType {
   shorts: ShortItem[];
   playlists: Playlist[];
   comments: Record<string, Comment[]>;
+  posts: CommunityPost[];
   categories: CategoryItem[];
   platformSettings: PlatformSettings;
   reports: ReportItem[];
   activityLogs: ActivityLog[];
   allUsers: UserProfile[];
+  creatorApplications: CreatorApplication[];
   transactions: PaymentTransaction[];
   videoPurchases: VideoPurchase[];
   downloads: DownloadRecord[];
+  recentEngagementEvents: EngagementEvent[];
 
   // Personal User State
   likedVideoIds: string[];
@@ -139,6 +196,12 @@ interface AppContextType {
 
   // Real Auth & RBAC Roles
   currentUser: FirebaseUser | null;
+  isAuthenticated: boolean;
+  emailVerified: boolean;
+  authLoading: boolean;
+  authError: string | null;
+  isAuthModalOpen: boolean;
+  authModalMode: 'signin' | 'signup';
   userProfile: UserProfile;
   isSuperAdmin: boolean;
   isAdmin: boolean;
@@ -159,6 +222,7 @@ interface AppContextType {
     }
   ) => void;
   setActiveCategory: (cat: string) => void;
+  setAccessFilter: (filter: AccessFilter) => void;
   setSearchQuery: (query: string) => void;
   toggleSidebar: () => void;
   setSidebarOpen: (open: boolean) => void;
@@ -170,13 +234,27 @@ interface AppContextType {
   toggleDislikeVideo: (videoId: string) => void;
   toggleSubscribe: (channelId: string) => void;
   toggleWatchLater: (videoId: string) => void;
-  addToHistory: (videoId: string, progressPercent?: number) => void;
+  addToHistory: (videoId: string, progressPercent?: number, lastPositionSec?: number) => void;
   removeFromHistory: (videoId: string) => void;
   clearHistory: () => void;
   addComment: (videoId: string, text: string) => void;
   likeComment: (videoId: string, commentId: string) => void;
   createPlaylist: (title: string, description: string, isPrivate: boolean, initialVideoId?: string) => string;
   toggleVideoInPlaylist: (playlistId: string, videoId: string) => void;
+  removePlaylist: (playlistId: string) => Promise<void>;
+  sendVideoReaction: (videoId: string, type: ReactionType, emoji: string, videoTime: number) => Promise<LiveReaction>;
+  trackVideoShare: (videoId: string) => void;
+
+  // Community Posts & Creator Applications
+  createCommunityPost: (channelId: string, text: string, imageUrl?: string) => Promise<CommunityPost>;
+  toggleLikeCommunityPost: (postId: string) => Promise<void>;
+  removeCommunityPost: (postId: string) => Promise<void>;
+  applyForCreator: (payload: { channelName: string; channelHandle: string; category: string; bio: string }) => Promise<CreatorApplication>;
+  reviewCreatorApplication: (app: CreatorApplication, status: 'approved' | 'rejected', notes?: string) => Promise<void>;
+
+  // Categories Governance
+  saveCategory: (cat: CategoryItem) => Promise<void>;
+  removeCategory: (catId: string) => Promise<void>;
 
   // Video Publishing & Payment Actions (100 ETB Standard)
   uploadVideo: (videoData: Partial<Video>, transactionId?: string) => Promise<string>;
@@ -191,6 +269,7 @@ interface AppContextType {
 
   // PRO Video Monetization & Telebirr Watch-to-Unlock
   isPurchased: (videoId: string) => boolean;
+  getPendingPurchase: (videoId: string) => VideoPurchase | undefined;
   purchaseVideo: (
     video: Video,
     provider: 'telebirr' | 'cbe_birr' | 'chapa',
@@ -206,7 +285,7 @@ interface AppContextType {
   cancelDownload: (id: string) => void;
   removeDownload: (id: string) => void;
 
-  // Shorts & Community
+  // Shorts & Moderation & Staff Governance
   publishShort: (shortData: Partial<ShortItem>) => Promise<string>;
   removeShort: (shortId: string) => Promise<void>;
   likeShort: (shortId: string) => void;
@@ -215,16 +294,32 @@ interface AppContextType {
   submitReport: (targetType: ReportItem['targetType'], targetId: string, reason: string, targetTitle?: string) => Promise<string>;
   resolveModerationReport: (reportId: string, status: 'resolved' | 'dismissed') => Promise<void>;
   changeUserRole: (uid: string, role: UserRole) => Promise<void>;
+  toggleUserBan: (uid: string, isBanned: boolean) => Promise<void>;
   updateSettings: (newSettings: Partial<PlatformSettings>) => Promise<void>;
   sendAnnouncement: (title: string, message: string, videoId?: string) => Promise<void>;
   saveChannelProfile: (channel: Partial<Channel> & { id: string }) => Promise<void>;
 
   // Auth Operations
-  signInWithGoogle: () => Promise<void>;
+  signInWithGoogle: (creatorRequest?: { channelName: string; bio: string }) => Promise<boolean>;
+  signInWithEmail: (email: string, password: string) => Promise<boolean>;
+  signUpWithEmail: (payload: {
+    email: string;
+    password: string;
+    displayName: string;
+    requestCreator?: boolean;
+    channelName?: string;
+    bio?: string;
+  }) => Promise<boolean>;
+  sendPasswordReset: (email: string) => Promise<boolean>;
+  resendVerificationEmail: () => Promise<boolean>;
+  refreshAuthUser: () => Promise<boolean>;
   signOutUser: () => Promise<void>;
-  switchDemoRole: (role: UserRole) => void;
+  setIsAuthModalOpen: (open: boolean) => void;
+  setAuthModalMode: (mode: 'signin' | 'signup') => void;
+  openAuthModal: (mode?: 'signin' | 'signup') => void;
+  clearAuthError: () => void;
 
-  // Modals
+  // Modals & Toasts
   markNotificationsRead: () => void;
   setMiniPlayerState: (state: Partial<MiniPlayerState>) => void;
   closeMiniPlayer: () => void;
@@ -235,18 +330,40 @@ interface AppContextType {
   setPlaylistModalVideo: (video: Video | null) => void;
   setEditingVideo: (video: Video | null) => void;
   setDownloadModalVideo: (video: Video | null) => void;
+  toast: ToastNotification | null;
+  showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
+  clearToast: () => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [viewMode, setViewMode] = useState<ViewMode>('home');
-  const [currentVideoId, setCurrentVideoId] = useState<string | null>(null);
-  const [currentChannelId, setCurrentChannelId] = useState<string | null>(null);
-  const [currentPlaylistId, setCurrentPlaylistId] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState<string>('');
+  const location = useLocation();
+  const routerNavigate = useNavigate();
+
+  const initialRoute = React.useMemo(
+    () => mapPathToRouteState(location.pathname, location.search),
+    []
+  );
+
+  const [viewMode, setViewMode] = useState<ViewMode>(initialRoute.viewMode);
+  const [currentVideoId, setCurrentVideoId] = useState<string | null>(initialRoute.videoId || null);
+  const [currentChannelId, setCurrentChannelId] = useState<string | null>(initialRoute.channelId || null);
+  const [currentPlaylistId, setCurrentPlaylistId] = useState<string | null>(initialRoute.playlistId || null);
+  const [searchQuery, setSearchQuery] = useState<string>(initialRoute.searchQuery || '');
   const [activeCategory, setActiveCategory] = useState<string>('All');
+  const [accessFilter, setAccessFilter] = useState<AccessFilter>('all');
   const [adminActiveTab, setAdminActiveTab] = useState<string>('overview');
+
+  // Synchronize React Router location changes (browser back/forward/direct URL)
+  useEffect(() => {
+    const mapped = mapPathToRouteState(location.pathname, location.search);
+    setViewMode(mapped.viewMode);
+    if (mapped.videoId !== undefined) setCurrentVideoId(mapped.videoId);
+    if (mapped.channelId !== undefined) setCurrentChannelId(mapped.channelId);
+    if (mapped.playlistId !== undefined) setCurrentPlaylistId(mapped.playlistId);
+    if (mapped.searchQuery !== undefined) setSearchQuery(mapped.searchQuery);
+  }, [location.pathname, location.search]);
 
   // Bilingual Language Support (Default English, saves in localStorage)
   const [language, setLanguageState] = useState<Language>(() => {
@@ -272,61 +389,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [shorts, setShorts] = useState<ShortItem[]>(INITIAL_SHORTS);
   const [playlists, setPlaylists] = useState<Playlist[]>(INITIAL_PLAYLISTS);
   const [comments, setComments] = useState<Record<string, Comment[]>>(INITIAL_COMMENTS as Record<string, Comment[]>);
+  const [posts, setPosts] = useState<CommunityPost[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>(INITIAL_NOTIFICATIONS);
   const [reports, setReports] = useState<ReportItem[]>([]);
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
   const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
+  const [creatorApplications, setCreatorApplications] = useState<CreatorApplication[]>([]);
   const [categories, setCategories] = useState<CategoryItem[]>(DEFAULT_CATEGORIES);
   const [transactions, setTransactions] = useState<PaymentTransaction[]>([]);
+  const [recentEngagementEvents, setRecentEngagementEvents] = useState<EngagementEvent[]>([]);
   const [platformSettings, setPlatformSettings] = useState<PlatformSettings>(DEFAULT_SETTINGS);
-  const [videoPurchases, setVideoPurchases] = useState<VideoPurchase[]>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem('svtech_purchases');
-        if (saved) return JSON.parse(saved);
-      } catch (e) {
-        console.warn('Failed to parse purchases storage');
-      }
-    }
-    return [
-      {
-        purchaseId: 'purchase_sample_1',
-        userId: 'dev-admin-uid',
-        userEmail: 'vipsami612@gmail.com',
-        videoId: 'video-2',
-        videoTitle: 'Tears of Steel - High Budget Cyberpunk Sci-Fi Short Film',
-        videoThumbnail: 'https://images.unsplash.com/photo-1578632767115-351597cf2477?w=800&auto=format&fit=crop&q=80',
-        amount: 100,
-        currency: 'ETB',
-        provider: 'telebirr',
-        transactionReference: 'TB-92817462',
-        paymentStatus: 'successful',
-        createdAt: '2 days ago',
-        verifiedAt: '2 days ago',
-        telebirrMerchantNumber: '0913767842'
-      }
-    ];
-  });
-
-  // Sync purchases to localStorage
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('svtech_purchases', JSON.stringify(videoPurchases));
-    }
-  }, [videoPurchases]);
+  const [videoPurchases, setVideoPurchases] = useState<VideoPurchase[]>([]);
 
   // Authenticated user & RBAC
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
+  const [authLoading, setAuthLoading] = useState<boolean>(true);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+  const [authModalMode, setAuthModalMode] = useState<'signin' | 'signup'>('signin');
   const [userProfile, setUserProfile] = useState<UserProfile>({
-    uid: 'dev-admin-uid',
-    email: 'vipsami612@gmail.com',
-    displayName: 'SVTech Platform Administrator',
-    photoURL: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
-    role: 'super_admin',
-    channelId: 'my-channel'
+    uid: 'guest-uid',
+    email: '',
+    displayName: 'Guest Viewer',
+    photoURL: '',
+    role: 'free_user',
+    channelId: 'my-channel',
+    creatorStatus: 'none'
   });
 
-  // Downloads library (Stored locally with real renditions)
+  // Downloads library (Stored locally)
   const [downloads, setDownloads] = useState<DownloadRecord[]>(() => {
     if (typeof window !== 'undefined') {
       try {
@@ -336,44 +427,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         console.warn('Failed to parse downloads storage');
       }
     }
-    return [
-      {
-        id: 'dl_init_1',
-        videoId: 'video-1',
-        videoTitle: 'Big Buck Bunny 4K Remastered Special Edition',
-        thumbnailUrl: 'https://images.unsplash.com/photo-1578632767115-351597cf2477?w=800&auto=format&fit=crop&q=80',
-        quality: '1080p',
-        fileSizeFormatted: '142 MB',
-        downloadUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-        downloadedAt: 'Yesterday',
-        status: 'completed',
-        progress: 100
-      }
-    ];
+    return [];
   });
 
-  // Sync downloads to localStorage
   useEffect(() => {
     if (typeof window !== 'undefined') {
       localStorage.setItem('svtech_downloads', JSON.stringify(downloads));
     }
   }, [downloads]);
 
-  // User personal states (saved in localStorage)
-  const [likedVideoIds, setLikedVideoIds] = useState<string[]>(['video-1', 'video-5']);
+  // User personal states
+  const [likedVideoIds, setLikedVideoIds] = useState<string[]>([]);
   const [dislikedVideoIds, setDislikedVideoIds] = useState<string[]>([]);
   const [subscribedChannelIds, setSubscribedChannelIds] = useState<string[]>([
     'blender-foundation',
     'tech-overdrive'
   ]);
-  const [watchLaterVideoIds, setWatchLaterVideoIds] = useState<string[]>(['video-2', 'video-7']);
-  const [watchHistory, setWatchHistory] = useState<HistoryItem[]>([
-    { videoId: 'video-1', watchedAt: '2 hours ago', progressPercent: 65 },
-    { videoId: 'video-3', watchedAt: 'Yesterday', progressPercent: 100 },
-    { videoId: 'video-5', watchedAt: '3 days ago', progressPercent: 40 }
-  ]);
+  const [watchLaterVideoIds, setWatchLaterVideoIds] = useState<string[]>([]);
+  const [watchHistory, setWatchHistory] = useState<HistoryItem[]>([]);
 
-  // Responsive UI States: Default to open ONLY on large screens (desktop >= 1024px)
+  // Responsive UI States
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       return window.innerWidth >= 1024;
@@ -385,7 +458,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('svtech_theme');
       if (saved) return saved === 'dark';
-      return true; // Default dark
+      return true;
     }
     return true;
   });
@@ -403,8 +476,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [playlistModalVideo, setPlaylistModalVideo] = useState<Video | null>(null);
   const [editingVideo, setEditingVideo] = useState<Video | null>(null);
   const [downloadModalVideo, setDownloadModalVideo] = useState<Video | null>(null);
+  const [toast, setToast] = useState<ToastNotification | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastHistorySyncRef = useRef<Record<string, number>>({});
 
-  // Sync dark class on documentElement
+  const clearToast = () => {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = null;
+    }
+    setToast(null);
+  };
+
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
+    const id = Date.now();
+    setToast({ id, type, message });
+    toastTimerRef.current = setTimeout(() => {
+      setToast(current => (current?.id === id ? null : current));
+    }, 4000);
+  };
+
   useEffect(() => {
     if (darkMode) {
       document.documentElement.classList.add('dark');
@@ -415,7 +509,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [darkMode]);
 
-  // Window resize handler to auto-collapse sidebar on smaller viewports
   useEffect(() => {
     const handleResize = () => {
       if (window.innerWidth < 1024 && sidebarOpen) {
@@ -426,32 +519,73 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => window.removeEventListener('resize', handleResize);
   }, [sidebarOpen]);
 
-  // Test connection & seed initial Firestore catalog
   useEffect(() => {
     testConnection();
-    initializeFirestoreDatabase('vipsami612@gmail.com');
   }, []);
 
-  // Firebase Auth listener
+  // Firebase Auth listener + Real-time Firestore user profile & role sync
   useEffect(() => {
-    const unsubscribeAuth = onAuthStateChanged(auth, user => {
+    let unsubUserProfile: (() => void) | null = null;
+
+    const unsubscribeAuth = onAuthStateChanged(auth, async user => {
       setCurrentUser(user);
+      setAuthLoading(false);
+
+      if (unsubUserProfile) {
+        unsubUserProfile();
+        unsubUserProfile = null;
+      }
+
       if (user) {
         const isSuperAdminEmail = user.email === 'vipsami612@gmail.com';
-        setUserProfile(prev => ({
-          ...prev,
+        const initialRole: UserRole = isSuperAdminEmail ? 'super_admin' : 'free_user';
+
+        const baseProfile: UserProfile = {
           uid: user.uid,
           email: user.email || 'user@svtechmedia.com',
-          displayName: user.displayName || user.email?.split('@')[0] || 'SVTech Creator',
-          photoURL: user.photoURL || prev.photoURL,
-          role: isSuperAdminEmail ? 'super_admin' : prev.role
-        }));
+          displayName: user.displayName || user.email?.split('@')[0] || 'SVTech Member',
+          photoURL: user.photoURL || '',
+          role: initialRole,
+          emailVerified: user.emailVerified,
+          creatorStatus: isSuperAdminEmail ? 'approved' : 'none',
+          channelId: `ch_${user.uid.slice(0, 10)}`
+        };
+
+        setUserProfile(baseProfile);
+
+        let syncedOnce = false;
+        unsubUserProfile = subscribeToUserProfile(user.uid, fsProfile => {
+          if (fsProfile) {
+            setUserProfile({
+              ...fsProfile,
+              emailVerified: user.emailVerified,
+              role: isSuperAdminEmail ? 'super_admin' : (fsProfile.role || 'free_user')
+            });
+          } else if (!syncedOnce) {
+            syncedOnce = true;
+            createOrSyncUserProfile(baseProfile);
+          }
+        });
+      } else {
+        setUserProfile({
+          uid: 'guest-uid',
+          email: '',
+          displayName: 'Guest Viewer',
+          photoURL: '',
+          role: 'free_user',
+          channelId: 'my-channel',
+          creatorStatus: 'none'
+        });
       }
     });
-    return () => unsubscribeAuth();
+
+    return () => {
+      unsubscribeAuth();
+      if (unsubUserProfile) unsubUserProfile();
+    };
   }, []);
 
-  // Real-time Firestore subscriptions via onSnapshot with proper cleanup
+  // Public real-time Firestore subscriptions
   useEffect(() => {
     const unsubVideos = subscribeToVideos(firestoreVideos => {
       if (firestoreVideos && firestoreVideos.length > 0) {
@@ -477,6 +611,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     });
 
+    const unsubPosts = subscribeToCommunityPosts(firestorePosts => {
+      setPosts(firestorePosts);
+    });
+
+    const unsubCategories = subscribeToCategories(firestoreCats => {
+      if (firestoreCats && firestoreCats.length > 0) {
+        setCategories(firestoreCats);
+      }
+    });
+
     const unsubNotifications = subscribeToNotifications(firestoreNotifs => {
       if (firestoreNotifs && firestoreNotifs.length > 0) {
         setNotifications(firestoreNotifs);
@@ -495,30 +639,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     });
 
-    const unsubReports = subscribeToReports(firestoreReports => {
-      setReports(firestoreReports);
-    });
-
-    const unsubLogs = subscribeToActivityLogs(firestoreLogs => {
-      setActivityLogs(firestoreLogs);
-    });
-
-    const unsubUsers = subscribeToUsers(firestoreUsers => {
-      setAllUsers(firestoreUsers);
-    });
-
     const unsubSettings = subscribeToPlatformSettings(firestoreSettings => {
       setPlatformSettings(firestoreSettings);
     });
 
-    const unsubTransactions = subscribeToTransactions(txs => {
-      setTransactions(txs);
-    });
-
-    const unsubPurchases = subscribeToVideoPurchases(firestorePurchases => {
-      if (firestorePurchases && firestorePurchases.length > 0) {
-        setVideoPurchases(firestorePurchases);
-      }
+    const unsubEngagement24h = subscribeToEngagementEvents24h(events => {
+      setRecentEngagementEvents(events);
     });
 
     return () => {
@@ -526,16 +652,104 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       unsubChannels();
       unsubShorts();
       unsubPlaylists();
+      unsubPosts();
+      unsubCategories();
       unsubNotifications();
       unsubAllComments();
-      unsubReports();
-      unsubLogs();
-      unsubUsers();
       unsubSettings();
-      unsubTransactions();
-      unsubPurchases();
+      unsubEngagement24h();
     };
   }, []);
+
+  // Auth- & Role-gated Firestore listeners
+  useEffect(() => {
+    if (authLoading || !currentUser) {
+      setReports([]);
+      setActivityLogs([]);
+      setAllUsers([]);
+      setTransactions([]);
+      setVideoPurchases([]);
+      setCreatorApplications([]);
+      setWatchHistory([]);
+      return;
+    }
+
+    const uid = currentUser.uid;
+    const roleIsAdmin =
+      userProfile.role === 'super_admin' ||
+      userProfile.role === 'admin' ||
+      currentUser.email === 'vipsami612@gmail.com';
+    const roleIsModerator = roleIsAdmin || userProfile.role === 'moderator';
+
+    const unsubs: (() => void)[] = [];
+
+    if (roleIsAdmin) {
+      initializeFirestoreDatabase(currentUser.email || 'vipsami612@gmail.com');
+    }
+
+    unsubs.push(
+      subscribeToUsers(firestoreUsers => {
+        setAllUsers(firestoreUsers);
+      })
+    );
+
+    unsubs.push(
+      subscribeToUserWatchHistory(uid, items => {
+        setWatchHistory(items);
+      })
+    );
+
+    unsubs.push(
+      subscribeToCreatorApplications(
+        apps => setCreatorApplications(apps),
+        roleIsAdmin ? undefined : uid
+      )
+    );
+
+    if (roleIsModerator) {
+      unsubs.push(
+        subscribeToReports(firestoreReports => {
+          setReports(firestoreReports);
+        })
+      );
+    } else {
+      setReports([]);
+    }
+
+    if (roleIsAdmin) {
+      unsubs.push(
+        subscribeToActivityLogs(firestoreLogs => {
+          setActivityLogs(firestoreLogs);
+        })
+      );
+      unsubs.push(
+        subscribeToTransactions(txs => {
+          setTransactions(txs);
+        })
+      );
+      unsubs.push(
+        subscribeToVideoPurchases(firestorePurchases => {
+          setVideoPurchases(firestorePurchases);
+        })
+      );
+    } else {
+      setActivityLogs([]);
+      unsubs.push(
+        subscribeToUserTransactions(uid, txs => {
+          setTransactions(txs);
+        })
+      );
+      unsubs.push(
+        subscribeToUserVideoPurchases(uid, firestorePurchases => {
+          setVideoPurchases(firestorePurchases);
+        })
+      );
+    }
+
+    return () => {
+      unsubs.forEach(unsub => unsub());
+    };
+  }, [authLoading, currentUser?.uid, currentUser?.email, userProfile.role]);
 
   const toggleDarkMode = () => {
     setDarkMode(prev => !prev);
@@ -552,6 +766,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const isCreator = isAdmin || isModerator || userProfile.role === 'creator';
   const isProUser = userProfile.role === 'pro_user';
   const isFreeUser = userProfile.role === 'free_user';
+  const emailVerified = Boolean(currentUser?.emailVerified || currentUser?.providerData?.some(p => p.providerId === 'google.com'));
 
   const navigate = (
     mode: ViewMode,
@@ -576,10 +791,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     if (mode === 'watch' && options?.videoId) {
+      const targetId = options.videoId;
       setMiniPlayer(prev => ({ ...prev, active: false }));
-      setCurrentVideoId(options.videoId);
-      addToHistory(options.videoId, 5);
-      incrementVideoViews(options.videoId);
+      setCurrentVideoId(targetId);
+      addToHistory(targetId, 5, 0);
+      setVideos(prev =>
+        prev.map(v =>
+          v.id === targetId
+            ? {
+                ...v,
+                views: (v.views || 0) + 1,
+                views24h: (v.views24h ?? Math.round((v.views || 0) * 0.12)) + 1,
+                lastEngagedAt: new Date().toISOString()
+              }
+            : v
+        )
+      );
+      incrementVideoViews(targetId);
     }
 
     if (options?.channelId) {
@@ -595,6 +823,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     setViewMode(mode);
+
+    const targetPath = mapViewModeToPath(mode, {
+      videoId: options?.videoId || currentVideoId,
+      channelId: options?.channelId || currentChannelId,
+      playlistId: options?.playlistId || currentPlaylistId,
+      searchQuery: options?.searchQuery !== undefined ? options.searchQuery : searchQuery
+    });
+    if (`${location.pathname}${location.search}` !== targetPath) {
+      routerNavigate(targetPath);
+    }
+
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -619,7 +858,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const delta = isLiked ? -1 : 1;
 
     setVideos(prev =>
-      prev.map(v => (v.id === videoId ? { ...v, likes: Math.max(0, v.likes + delta) } : v))
+      prev.map(v =>
+        v.id === videoId
+          ? {
+              ...v,
+              likes: Math.max(0, v.likes + delta),
+              likes24h: Math.max(0, (v.likes24h ?? Math.round((v.likes || 0) * 0.14)) + (delta > 0 ? 1 : 0)),
+              lastEngagedAt: delta > 0 ? new Date().toISOString() : v.lastEngagedAt
+            }
+          : v
+      )
     );
 
     if (isLiked) {
@@ -679,31 +927,63 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
   };
 
-  const addToHistory = (videoId: string, progressPercent = 0) => {
+  const addToHistory = (videoId: string, progressPercent = 0, lastPositionSec?: number) => {
+    const nowIso = new Date().toISOString();
+    const item: HistoryItem = {
+      videoId,
+      watchedAt: 'Just now',
+      progressPercent: Math.max(0, Math.min(100, Math.round(progressPercent))),
+      lastPositionSec: lastPositionSec !== undefined ? Math.max(0, Math.round(lastPositionSec)) : undefined,
+      updatedAt: nowIso
+    };
+
     setWatchHistory(prev => {
+      const existing = prev.find(h => h.videoId === videoId);
+      const merged: HistoryItem = {
+        ...existing,
+        ...item,
+        lastPositionSec: item.lastPositionSec ?? existing?.lastPositionSec ?? 0
+      };
       const filtered = prev.filter(h => h.videoId !== videoId);
-      return [
-        {
-          videoId,
-          watchedAt: 'Just now',
-          progressPercent
-        },
-        ...filtered
-      ];
+      return [merged, ...filtered];
     });
+
+    if (currentUser?.uid) {
+      const lastSync = lastHistorySyncRef.current[videoId] || 0;
+      const nowMs = Date.now();
+      if (nowMs - lastSync >= 4000 || progressPercent >= 95) {
+        lastHistorySyncRef.current[videoId] = nowMs;
+        upsertUserWatchHistory(currentUser.uid, {
+          ...item,
+          lastPositionSec: item.lastPositionSec ?? 0
+        });
+      }
+    }
   };
 
   const removeFromHistory = (videoId: string) => {
     setWatchHistory(prev => prev.filter(h => h.videoId !== videoId));
+    if (currentUser?.uid) {
+      removeUserWatchHistoryItem(currentUser.uid, videoId);
+    }
   };
 
   const clearHistory = () => {
+    const existingIds = watchHistory.map(h => h.videoId);
     setWatchHistory([]);
+    if (currentUser?.uid) {
+      existingIds.forEach(vidId => removeUserWatchHistoryItem(currentUser.uid, vidId));
+    }
   };
 
   const addComment = async (videoId: string, text: string) => {
     if (!text.trim()) return;
-    const authorName = userProfile.displayName || 'You (Creator)';
+    if (!currentUser) {
+      showToast('Please sign in to post a comment.', 'info');
+      openAuthModal('signin');
+      return;
+    }
+    const authorName = userProfile.displayName || 'Viewer';
     const authorAvatar = userProfile.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80';
 
     const newComment: Comment = {
@@ -725,6 +1005,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...prev,
       [videoId]: [newComment, ...(prev[videoId] || [])]
     }));
+
+    setVideos(prev =>
+      prev.map(v =>
+        v.id === videoId
+          ? {
+              ...v,
+              commentsCount: (v.commentsCount || 0) + 1,
+              comments24h: (v.comments24h ?? Math.round((v.commentsCount || 0) * 0.18)) + 1,
+              lastEngagedAt: new Date().toISOString()
+            }
+          : v
+      )
+    );
 
     await postComment(videoId, {
       text: text.trim(),
@@ -767,102 +1060,334 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       title,
       description,
       videoIds: initialVideoId ? [initialVideoId] : [],
-      updatedAt: 'Just now',
+      updatedAt: new Date().toISOString(),
       isPrivate,
       ownerUid: userProfile.uid
     };
     setPlaylists(prev => [newPl, ...prev]);
+    if (currentUser) {
+      savePlaylistToFirestore(newPl);
+    }
     return id;
   };
 
   const toggleVideoInPlaylist = (playlistId: string, videoId: string) => {
+    let updatedTarget: Playlist | null = null;
     setPlaylists(prev =>
       prev.map(pl => {
         if (pl.id === playlistId) {
           const exists = pl.videoIds.includes(videoId);
-          return {
+          updatedTarget = {
             ...pl,
             videoIds: exists ? pl.videoIds.filter(id => id !== videoId) : [...pl.videoIds, videoId],
-            updatedAt: 'Just now'
+            updatedAt: new Date().toISOString()
           };
+          return updatedTarget;
         }
         return pl;
       })
     );
+    if (updatedTarget && currentUser) {
+      savePlaylistToFirestore(updatedTarget);
+    }
+  };
+
+  const removePlaylist = async (playlistId: string) => {
+    setPlaylists(prev => prev.filter(pl => pl.id !== playlistId));
+    if (currentUser) {
+      await deletePlaylistFromFirestore(playlistId);
+    }
+    showToast('Playlist deleted', 'info');
+  };
+
+  const sendVideoReaction = async (
+    videoId: string,
+    type: ReactionType,
+    emoji: string,
+    videoTime: number
+  ): Promise<LiveReaction> => {
+    const nowIso = new Date().toISOString();
+    const optimisticReaction: LiveReaction = {
+      id: `local_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      videoId,
+      emoji,
+      type,
+      userId: userProfile.uid || 'guest',
+      userName: userProfile.displayName || 'Viewer',
+      videoTime: Math.max(0, Math.round(videoTime)),
+      createdAt: nowIso
+    };
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('svtech:live-reaction', { detail: optimisticReaction })
+      );
+      if ('BroadcastChannel' in window) {
+        try {
+          const bc = new BroadcastChannel('svtech_live_reactions');
+          bc.postMessage(optimisticReaction);
+          bc.close();
+        } catch {
+          // Ignore
+        }
+      }
+    }
+
+    setVideos(prev =>
+      prev.map(v =>
+        v.id === videoId
+          ? {
+              ...v,
+              reactionsCount: (v.reactionsCount || 0) + 1,
+              reactions24h: (v.reactions24h || 0) + 1,
+              lastEngagedAt: nowIso
+            }
+          : v
+      )
+    );
+
+    try {
+      return await sendLiveReaction({
+        videoId,
+        emoji,
+        type,
+        userId: userProfile.uid || 'guest',
+        userName: userProfile.displayName || 'Viewer',
+        videoTime
+      });
+    } catch {
+      return optimisticReaction;
+    }
+  };
+
+  const trackVideoShare = (videoId: string) => {
+    setVideos(prev =>
+      prev.map(v =>
+        v.id === videoId
+          ? {
+              ...v,
+              shares24h: (v.shares24h || 0) + 1,
+              lastEngagedAt: new Date().toISOString()
+            }
+          : v
+      )
+    );
+    incrementVideoShares(videoId);
+  };
+
+  // Community Posts
+  const createCommunityPost = async (channelId: string, text: string, imageUrl?: string) => {
+    if (!currentUser) {
+      throw new Error('Sign in required to publish a community post.');
+    }
+    const post = await createCommunityPostInFirestore({
+      channelId,
+      authorUid: currentUser.uid,
+      authorName: userProfile.displayName,
+      authorAvatarUrl:
+        userProfile.photoURL ||
+        'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+      text: text.trim(),
+      ...(imageUrl ? { imageUrl } : {})
+    });
+    setPosts(prev => [post, ...prev.filter(p => p.id !== post.id)]);
+    showToast('Community post published!', 'success');
+    return post;
+  };
+
+  const toggleLikeCommunityPost = async (postId: string) => {
+    if (!currentUser) {
+      showToast('Sign in to like community posts.', 'info');
+      return;
+    }
+    const target = posts.find(p => p.id === postId);
+    const alreadyLiked = Boolean(target?.likedBy?.includes(currentUser.uid));
+    setPosts(prev =>
+      prev.map(p => {
+        if (p.id !== postId) return p;
+        const likedBy = p.likedBy || [];
+        return {
+          ...p,
+          likes: Math.max(0, p.likes + (alreadyLiked ? -1 : 1)),
+          likedBy: alreadyLiked
+            ? likedBy.filter(u => u !== currentUser.uid)
+            : [...likedBy, currentUser.uid]
+        };
+      })
+    );
+    await toggleCommunityPostLikeInFirestore(postId, currentUser.uid, alreadyLiked);
+  };
+
+  const removeCommunityPost = async (postId: string) => {
+    setPosts(prev => prev.filter(p => p.id !== postId));
+    await deleteCommunityPostInFirestore(postId);
+    showToast('Community post deleted.', 'info');
+  };
+
+  // Creator Applications
+  const applyForCreator = async (payload: {
+    channelName: string;
+    channelHandle: string;
+    category: string;
+    bio: string;
+  }) => {
+    if (!currentUser) {
+      throw new Error('Please sign in first to apply as a creator.');
+    }
+    const appDoc = await submitCreatorApplicationInFirestore({
+      uid: currentUser.uid,
+      email: userProfile.email,
+      displayName: userProfile.displayName,
+      ...payload
+    });
+    setCreatorApplications(prev => [appDoc, ...prev]);
+    setUserProfile(prev => ({ ...prev, creatorStatus: 'pending' }));
+    showToast('Creator application submitted for Admin review!', 'success');
+    return appDoc;
+  };
+
+  const reviewCreatorApplication = async (
+    app: CreatorApplication,
+    status: 'approved' | 'rejected',
+    notes?: string
+  ) => {
+    await reviewCreatorApplicationInFirestore({
+      appId: app.id,
+      targetUid: app.uid,
+      status,
+      reviewerEmail: userProfile.email,
+      notes,
+      channelName: app.channelName,
+      channelHandle: app.channelHandle,
+      bio: app.bio
+    });
+    setCreatorApplications(prev =>
+      prev.map(a => (a.id === app.id ? { ...a, status, reviewedBy: userProfile.email } : a))
+    );
+    if (status === 'approved') {
+      setAllUsers(prev =>
+        prev.map(u => (u.uid === app.uid ? { ...u, role: 'creator', creatorStatus: 'approved' } : u))
+      );
+    }
+    await logPlatformActivity(
+      userProfile.email,
+      status === 'approved' ? 'CREATOR_APPROVED' : 'CREATOR_REJECTED',
+      `${status.toUpperCase()} creator application for ${app.email} (${app.channelName})`
+    );
+    showToast(`Creator application ${status}!`, status === 'approved' ? 'success' : 'info');
+  };
+
+  // Categories
+  const saveCategory = async (cat: CategoryItem) => {
+    setCategories(prev => {
+      const exists = prev.some(c => c.id === cat.id);
+      return exists ? prev.map(c => (c.id === cat.id ? cat : c)) : [...prev, cat];
+    });
+    await saveCategoryInFirestore(cat);
+    showToast(`Category "${cat.name}" saved.`, 'success');
+  };
+
+  const removeCategory = async (catId: string) => {
+    setCategories(prev => prev.filter(c => c.id !== catId));
+    await deleteCategoryInFirestore(catId);
+    showToast('Category removed.', 'info');
   };
 
   // Video publishing with Ethiopian Birr rule enforcement
   const uploadVideo = async (videoData: Partial<Video>, transactionId?: string): Promise<string> => {
     const id = videoData.id || `video_${Date.now()}`;
-    const myChannel = channels.find(c => c.id === userProfile.channelId) || {
+    const existingVideo = videos.find(v => v.id === id);
+    const myChannel = existingVideo?.channel || channels.find(c => c.id === userProfile.channelId) || {
       id: userProfile.channelId || 'my-channel',
       name: userProfile.displayName || 'SVTech Creator Studio',
       handle: `@${(userProfile.displayName || 'creator').replace(/\s+/g, '').toLowerCase()}`,
-      avatarUrl: userProfile.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+      avatarUrl:
+        userProfile.photoURL ||
+        'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
       verified: true,
-      subscribers: '1.2K'
+      subscribers: '1'
     };
 
-    // Check fee exemption: Admins and Moderators publish free. Others must have paid 100 ETB or save as draft.
     const isExempt = isAdmin || isModerator;
-    const isPaid = isExempt || Boolean(transactionId);
+    const isPaid = existingVideo?.publishingFeePaid || isExempt || Boolean(transactionId);
+
+    const resolvedThumbUrl =
+      videoData.thumbnailUrl !== undefined
+        ? videoData.thumbnailUrl
+        : existingVideo?.thumbnailUrl || '';
+
+    const resolvedThumbStoragePath =
+      videoData.thumbnailStoragePath !== undefined
+        ? videoData.thumbnailStoragePath
+        : existingVideo?.thumbnailStoragePath;
+
+    const resolvedVideoStoragePath =
+      videoData.videoStoragePath !== undefined
+        ? videoData.videoStoragePath
+        : existingVideo?.videoStoragePath;
 
     const newVideo: Video = {
+      ...(existingVideo || {}),
       id,
-      title: videoData.title || 'Untitled Stream',
-      description: videoData.description || 'Published on SVTech Media.',
-      videoUrl: videoData.videoUrl || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-      thumbnailUrl:
-        videoData.thumbnailUrl ||
-        generateThumbnailSvg(
-          videoData.title || 'SVTech Video',
-          videoData.category || 'Tech',
-          '#1e1b4b',
-          '#0f172a',
-          '#e11d48',
-          'play'
-        ),
-      duration: videoData.duration || 60,
-      durationFormatted: videoData.durationFormatted || '1:00',
-      views: videoData.views ?? 1,
-      uploadDate: 'Just now',
-      category: videoData.category || 'Tech',
+      title: videoData.title || existingVideo?.title || 'Untitled Stream',
+      description: videoData.description || existingVideo?.description || 'Published on SVTech Media.',
+      videoUrl:
+        videoData.videoUrl ||
+        existingVideo?.videoUrl ||
+        'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+      ...(resolvedVideoStoragePath ? { videoStoragePath: resolvedVideoStoragePath } : {}),
+      thumbnailUrl: resolvedThumbUrl,
+      ...(resolvedThumbStoragePath ? { thumbnailStoragePath: resolvedThumbStoragePath } : {}),
+      duration: videoData.duration ?? existingVideo?.duration ?? 60,
+      durationFormatted: videoData.durationFormatted || existingVideo?.durationFormatted || '1:00',
+      views: videoData.views ?? existingVideo?.views ?? 1,
+      uploadDate: existingVideo?.uploadDate || 'Just now',
+      category: videoData.category || existingVideo?.category || 'Tech',
       channel: myChannel,
-      likes: videoData.likes ?? 1,
-      dislikes: 0,
-      tags: videoData.tags || ['SVTech', 'Media', 'Stream'],
-      chapters: videoData.chapters || [{ title: 'Overview', time: 0 }],
-      commentsCount: 0,
-      status: isPaid ? (videoData.status || 'published') : 'draft',
-      visibility: videoData.visibility || 'public',
-      isFeatured: videoData.isFeatured || false,
-      scheduledAt: videoData.scheduledAt || '',
-      ownerUid: userProfile.uid,
-      allowDownloads: videoData.allowDownloads ?? true,
+      likes: videoData.likes ?? existingVideo?.likes ?? 1,
+      dislikes: existingVideo?.dislikes ?? 0,
+      tags: videoData.tags || existingVideo?.tags || ['SVTech', 'Media', 'Stream'],
+      chapters: videoData.chapters || existingVideo?.chapters || [{ title: 'Overview', time: 0 }],
+      commentsCount: existingVideo?.commentsCount ?? 0,
+      status: isPaid ? (videoData.status || existingVideo?.status || 'published') : 'draft',
+      visibility: videoData.visibility || existingVideo?.visibility || 'public',
+      accessType: videoData.accessType || existingVideo?.accessType || 'free',
+      price: (videoData.accessType || existingVideo?.accessType) === 'pro' ? Number(videoData.price ?? existingVideo?.price) || 100 : 0,
+      currency: 'ETB',
+      isPremium: (videoData.accessType || existingVideo?.accessType) === 'pro',
+      isFeatured: videoData.isFeatured ?? existingVideo?.isFeatured ?? false,
+      scheduledAt: videoData.scheduledAt ?? existingVideo?.scheduledAt ?? '',
+      ownerUid: existingVideo?.ownerUid || currentUser?.uid || userProfile.uid,
+      allowDownloads: videoData.allowDownloads ?? existingVideo?.allowDownloads ?? true,
       publishingFeePaid: isPaid,
-      publishingFeeETB: isExempt ? 0 : 100,
-      transactionId: transactionId || (isExempt ? 'STAFF_WAIVER' : undefined),
-      createdAt: new Date().toISOString()
+      publishingFeeETB: existingVideo?.publishingFeeETB ?? (isExempt ? 0 : platformSettings.publishingFeeETB || 100),
+      ...(transactionId || existingVideo?.transactionId || isExempt
+        ? { transactionId: transactionId || existingVideo?.transactionId || 'STAFF_WAIVER' }
+        : {}),
+      createdAt: existingVideo?.createdAt || new Date().toISOString()
     };
+
+    if (videoData.thumbnailStoragePath === '') {
+      delete newVideo.thumbnailStoragePath;
+    }
 
     setVideos(prev => [newVideo, ...prev.filter(v => v.id !== id)]);
     await createOrUpdateVideo(newVideo);
     await logPlatformActivity(
       userProfile.email,
-      'VIDEO_PUBLISHED',
-      `Published "${newVideo.title}" (Fee: ${newVideo.publishingFeeETB} ETB)`
+      existingVideo ? 'VIDEO_UPDATED' : 'VIDEO_PUBLISHED',
+      `${existingVideo ? 'Updated' : 'Published'} "${newVideo.title}" (Fee: ${newVideo.publishingFeeETB} ETB)`
     );
 
     return id;
   };
 
-  // Payment creation for 100 ETB video publishing
   const initiatePublishingPayment = async (
     videoTitle: string,
     provider: 'telebirr' | 'cbe_birr' | 'chapa'
   ): Promise<PaymentTransaction> => {
     const tx = await createPaymentTransaction({
-      userId: userProfile.uid,
+      userId: currentUser?.uid || userProfile.uid,
       userEmail: userProfile.email,
       videoTitle,
       amount: platformSettings.publishingFeeETB || 100,
@@ -895,13 +1420,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // PRO Video Monetization & Telebirr Watch-to-Unlock
   const isPurchased = (videoId: string): boolean => {
     const vid = videos.find(v => v.id === videoId);
-    if (!vid) return true;
-    if (vid.accessType === 'free' || !vid.accessType) return true;
-    if (isAdmin) return true;
-    if (vid.ownerUid && vid.ownerUid === userProfile.uid) return true;
-    return videoPurchases.some(
-      p => p.videoId === videoId && p.userId === userProfile.uid && p.paymentStatus === 'successful'
-    );
+    return isVideoPurchased({
+      video: vid,
+      userId: currentUser?.uid || userProfile.uid,
+      userChannelId: userProfile.channelId,
+      isAdmin,
+      purchases: videoPurchases
+    });
+  };
+
+  const getPendingPurchase = (videoId: string): VideoPurchase | undefined => {
+    return hasPendingVideoPurchase({
+      videoId,
+      userId: currentUser?.uid || userProfile.uid,
+      purchases: videoPurchases
+    });
   };
 
   const purchaseVideo = async (
@@ -910,8 +1443,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     userTxnRef?: string,
     phone?: string
   ): Promise<VideoPurchase> => {
+    if (!currentUser) {
+      openAuthModal('signin');
+      throw new Error('Please sign in first to submit a Telebirr payment.');
+    }
     const newPurchase = await recordVideoPurchase({
-      userId: userProfile.uid,
+      userId: currentUser.uid,
       userEmail: userProfile.email,
       videoId: video.id,
       videoTitle: video.title,
@@ -922,14 +1459,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       transactionReference: userTxnRef || `TB-${Math.floor(10000000 + Math.random() * 90000000)}`,
       telebirrMerchantNumber: '0913767842',
       userContactPhone: phone || userProfile.phoneNumber || '0913767842',
-      notes: `Purchased with ${provider.toUpperCase()}`
+      notes: `Submitted via ${provider.toUpperCase()} — awaiting Admin verification`
     });
 
     setVideoPurchases(prev => [newPurchase, ...prev.filter(p => p.purchaseId !== newPurchase.purchaseId)]);
     await logPlatformActivity(
       userProfile.email,
-      'PRO_PURCHASE_INITIATED',
-      `Initiated ${video.price || 100} ETB purchase for "${video.title}" via ${provider.toUpperCase()}`
+      'PRO_PURCHASE_PENDING',
+      `Submitted ${video.price || 100} ETB Ref ${newPurchase.transactionReference} for "${video.title}"`
     );
     return newPurchase;
   };
@@ -938,20 +1475,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     await verifyVideoPurchase(purchaseId, userProfile.email);
     setVideoPurchases(prev =>
       prev.map(p =>
-        p.purchaseId === purchaseId
-          ? { ...p, paymentStatus: 'successful', verifiedAt: new Date().toISOString() }
+        p.purchaseId === purchaseId || p.id === purchaseId
+          ? { ...p, status: 'verified', paymentStatus: 'successful', verifiedAt: new Date().toISOString() }
           : p
       )
     );
+    showToast('Purchase verified! Video unlocked for user.', 'success');
   };
 
   const refundPurchase = async (purchaseId: string) => {
     await refundVideoPurchase(purchaseId, userProfile.email);
     setVideoPurchases(prev =>
       prev.map(p =>
-        p.purchaseId === purchaseId ? { ...p, paymentStatus: 'refunded' } : p
+        p.purchaseId === purchaseId || p.id === purchaseId
+          ? { ...p, status: 'refunded', paymentStatus: 'refunded' }
+          : p
       )
     );
+    showToast('Purchase marked as refunded.', 'info');
   };
 
   const setVideoAccessType = async (videoId: string, accessType: VideoAccessType, price: number) => {
@@ -966,13 +1507,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
   };
 
-  // Downloads manager with real file streaming & progress
   const startDownload = async (
     video: Video,
     quality: '360p' | '480p' | '720p' | '1080p'
   ) => {
+    if (!platformSettings.allowPublicDownloads && !isAdmin) {
+      showToast('Downloads are currently disabled by platform administrators.', 'error');
+      return;
+    }
     if (video.allowDownloads === false && !isAdmin) {
-      alert(t.watch.downloadNotAllowed);
+      showToast(t.watch.downloadNotAllowed, 'error');
       return;
     }
 
@@ -999,26 +1543,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setDownloads(prev => [newDownload, ...prev.filter(d => d.videoId !== video.id)]);
 
-    // Progression tracking
     setTimeout(() => {
       setDownloads(prev =>
         prev.map(d => (d.id === dlId ? { ...d, progress: 65 } : d))
       );
-    }, 400);
+    }, 350);
 
     setTimeout(() => {
       setDownloads(prev =>
         prev.map(d => (d.id === dlId ? { ...d, progress: 100, status: 'completed' } : d))
       );
 
-      // Trigger actual browser file save
       const a = document.createElement('a');
       a.href = video.videoUrl;
       a.download = `${video.title.replace(/[^a-zA-Z0-9]/g, '_')}_${quality}.mp4`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-    }, 900);
+      showToast(t.watch.downloadComplete, 'success');
+    }, 850);
   };
 
   const cancelDownload = (id: string) => {
@@ -1046,7 +1589,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       prev.map(v => (v.id === videoId ? { ...v, status, visibility } : v))
     );
     await updateVideoStatus(videoId, status, visibility);
-    await logPlatformActivity(userProfile.email, 'VIDEO_STATUS_UPDATED', `Set status ${status}/${visibility} for ${videoId}`);
+    await logPlatformActivity(
+      userProfile.email,
+      'VIDEO_STATUS_UPDATED',
+      `Set status ${status}/${visibility} for ${videoId}`
+    );
   };
 
   const toggleFeatureVideo = async (videoId: string, isFeatured: boolean) => {
@@ -1058,7 +1605,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const publishShort = async (shortData: Partial<ShortItem>): Promise<string> => {
     const id = shortData.id || `short_${Date.now()}`;
-    const myChannel = channels[0] || {
+    const myChannel = channels.find(c => c.id === userProfile.channelId) || channels[0] || {
       id: 'svtech-studio',
       name: 'SVTech Media Studio',
       handle: '@SVTechMedia',
@@ -1069,15 +1616,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const newShort: ShortItem = {
       id,
       title: shortData.title || 'SVTech Short Reel',
-      videoUrl: shortData.videoUrl || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-      thumbnailUrl: shortData.thumbnailUrl || generateThumbnailSvg('Short', 'Shorts', '#1e1b4b', '#030712', '#e11d48', 'sparkle'),
+      videoUrl:
+        shortData.videoUrl ||
+        'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+      ...(shortData.videoStoragePath ? { videoStoragePath: shortData.videoStoragePath } : {}),
+      thumbnailUrl: shortData.thumbnailUrl || '',
+      ...(shortData.thumbnailStoragePath ? { thumbnailStoragePath: shortData.thumbnailStoragePath } : {}),
       channel: myChannel,
       likes: 1,
       commentsCount: 0,
       soundTitle: shortData.soundTitle || 'SVTech Original Sound HD',
       tags: shortData.tags || ['svtech', 'shorts'],
       isFeatured: true,
-      ownerUid: userProfile.uid,
+      ownerUid: currentUser?.uid || userProfile.uid,
       createdAt: new Date().toISOString()
     };
 
@@ -1128,6 +1679,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     reason: string,
     targetTitle?: string
   ) => {
+    if (!currentUser) {
+      openAuthModal('signin');
+      throw new Error('Sign in required to submit a report.');
+    }
     const reportId = await fileReport({
       targetType,
       targetId,
@@ -1135,6 +1690,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       reason,
       reporterEmail: userProfile.email
     });
+    showToast(t.watch.reportSubmitted, 'success');
     return reportId;
   };
 
@@ -1143,6 +1699,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       prev.map(r => (r.id === reportId ? { ...r, status } : r))
     );
     await resolveReport(reportId, status);
+    await logPlatformActivity(userProfile.email, 'REPORT_MODERATION', `Marked report ${reportId} as ${status}`);
   };
 
   const changeUserRole = async (uid: string, role: UserRole) => {
@@ -1151,6 +1708,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
     await updateUserRole(uid, role);
     await logPlatformActivity(userProfile.email, 'ROLE_UPDATED', `Assigned ${role} to ${uid}`);
+    showToast(`Updated user role to ${role}`, 'success');
+  };
+
+  const toggleUserBan = async (uid: string, isBanned: boolean) => {
+    setAllUsers(prev =>
+      prev.map(u => (u.uid === uid ? { ...u, isBanned } : u))
+    );
+    await updateUserBanStatus(uid, isBanned);
+    await logPlatformActivity(
+      userProfile.email,
+      isBanned ? 'USER_BANNED' : 'USER_UNBANNED',
+      `${isBanned ? 'Suspended' : 'Restored'} user ${uid}`
+    );
+    showToast(isBanned ? 'User account suspended.' : 'User account restored.', 'info');
   };
 
   const updateSettings = async (newSettings: Partial<PlatformSettings>) => {
@@ -1158,6 +1729,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setPlatformSettings(updated);
     await savePlatformSettings(updated);
     await logPlatformActivity(userProfile.email, 'SETTINGS_UPDATED', 'Updated platform configuration');
+    showToast('Platform settings saved!', 'success');
   };
 
   const sendAnnouncement = async (title: string, message: string, videoId?: string) => {
@@ -1166,17 +1738,195 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const saveChannelProfile = async (channel: Partial<Channel> & { id: string }) => {
-    setChannels(prev =>
-      prev.map(c => (c.id === channel.id ? { ...c, ...channel } : c))
-    );
-    await createOrUpdateChannel(channel);
+    setChannels(prev => {
+      const exists = prev.some(c => c.id === channel.id);
+      return exists
+        ? prev.map(c => (c.id === channel.id ? { ...c, ...channel } : c))
+        : [{
+            name: channel.name || 'Creator Channel',
+            handle: channel.handle || '@creator',
+            avatarUrl: channel.avatarUrl || '',
+            bannerUrl: channel.bannerUrl || '',
+            subscribers: '1',
+            subscriberCountNumber: 1,
+            description: channel.description || '',
+            joinedDate: new Date().toLocaleDateString(),
+            totalViews: '0',
+            videosCount: 0,
+            ownerUid: currentUser?.uid,
+            ...channel
+          } as Channel, ...prev];
+    });
+    await createOrUpdateChannel({ ...channel, ownerUid: currentUser?.uid });
+    showToast('Channel profile saved!', 'success');
   };
 
-  const signInWithGoogle = async () => {
+  const formatAuthError = (err: any): string => {
+    const code = err?.code || '';
+    if (code === 'auth/operation-not-allowed') {
+      return 'Email/Password sign-in is not enabled in Firebase Console. Please enable it or use Google Sign-In.';
+    }
+    if (code === 'auth/email-already-in-use') {
+      return 'An account with this email already exists. Try signing in instead.';
+    }
+    if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found') {
+      return 'Invalid email or password. Please check your credentials and try again.';
+    }
+    if (code === 'auth/weak-password') {
+      return 'Password must be at least 6 characters long.';
+    }
+    if (code === 'auth/popup-closed-by-user') {
+      return 'Sign-in popup was closed before completing authentication.';
+    }
+    return err?.message || 'Authentication failed. Please try again.';
+  };
+
+  const openAuthModal = (mode: 'signin' | 'signup' = 'signin') => {
+    setAuthError(null);
+    setAuthModalMode(mode);
+    setIsAuthModalOpen(true);
+  };
+
+  const clearAuthError = () => setAuthError(null);
+
+  const signInWithGoogle = async (creatorRequest?: { channelName: string; bio: string }): Promise<boolean> => {
+    setAuthError(null);
     try {
-      await signInWithPopup(auth, googleProvider);
-    } catch (err) {
-      console.warn('Google sign in popup notice:', err);
+      const cred = await signInWithPopup(auth, googleProvider);
+      const user = cred.user;
+      const isSuperAdminEmail = user.email === 'vipsami612@gmail.com';
+      await createOrSyncUserProfile({
+        uid: user.uid,
+        email: user.email || '',
+        displayName: user.displayName || user.email?.split('@')[0] || 'SVTech User',
+        photoURL: user.photoURL || '',
+        role: isSuperAdminEmail ? 'super_admin' : 'free_user',
+        emailVerified: true,
+        channelId: `ch_${user.uid.slice(0, 10)}`
+      });
+      if (creatorRequest?.channelName?.trim() && !isSuperAdminEmail) {
+        await submitCreatorApplicationInFirestore({
+          uid: user.uid,
+          email: user.email || '',
+          displayName: user.displayName || user.email?.split('@')[0] || 'Creator',
+          channelName: creatorRequest.channelName.trim(),
+          channelHandle: `@${creatorRequest.channelName.trim().replace(/\s+/g, '').toLowerCase()}`,
+          category: 'Tech',
+          bio: creatorRequest.bio || 'SVTech Creator Application'
+        });
+      }
+      setIsAuthModalOpen(false);
+      return true;
+    } catch (err: any) {
+      setAuthError(formatAuthError(err));
+      return false;
+    }
+  };
+
+  const signInWithEmail = async (email: string, password: string): Promise<boolean> => {
+    setAuthError(null);
+    try {
+      await signInWithEmailAndPassword(auth, email.trim(), password);
+      setIsAuthModalOpen(false);
+      return true;
+    } catch (err: any) {
+      setAuthError(formatAuthError(err));
+      return false;
+    }
+  };
+
+  const signUpWithEmail = async (payload: {
+    email: string;
+    password: string;
+    displayName: string;
+    requestCreator?: boolean;
+    channelName?: string;
+    bio?: string;
+  }): Promise<boolean> => {
+    setAuthError(null);
+    try {
+      const cred = await createUserWithEmailAndPassword(
+        auth,
+        payload.email.trim(),
+        payload.password
+      );
+      const user = cred.user;
+      const cleanName = payload.displayName.trim() || payload.email.split('@')[0];
+      await updateProfile(user, { displayName: cleanName });
+
+      const isSuperAdminEmail = user.email === 'vipsami612@gmail.com';
+      await createOrSyncUserProfile({
+        uid: user.uid,
+        email: user.email || payload.email.trim(),
+        displayName: cleanName,
+        photoURL: user.photoURL || '',
+        role: isSuperAdminEmail ? 'super_admin' : 'free_user',
+        emailVerified: user.emailVerified,
+        creatorStatus: payload.requestCreator ? 'pending' : 'none',
+        channelId: `ch_${user.uid.slice(0, 10)}`
+      });
+
+      if (payload.requestCreator && !isSuperAdminEmail) {
+        await submitCreatorApplicationInFirestore({
+          uid: user.uid,
+          email: user.email || payload.email.trim(),
+          displayName: cleanName,
+          channelName: (payload.channelName || `${cleanName} Studio`).trim(),
+          channelHandle: `@${(payload.channelName || cleanName).replace(/\s+/g, '').toLowerCase()}`,
+          category: 'Tech',
+          bio: payload.bio?.trim() || 'Creator application submitted during signup'
+        });
+      }
+
+      try {
+        await sendEmailVerification(user);
+      } catch {
+        // Ignore if email verification throttle triggers
+      }
+
+      setIsAuthModalOpen(false);
+      showToast('Account created! Please check your email for verification link.', 'success');
+      return true;
+    } catch (err: any) {
+      setAuthError(formatAuthError(err));
+      return false;
+    }
+  };
+
+  const sendPasswordReset = async (email: string): Promise<boolean> => {
+    setAuthError(null);
+    try {
+      await sendPasswordResetEmail(auth, email.trim());
+      showToast(t.auth.resetSent, 'success');
+      return true;
+    } catch (err: any) {
+      setAuthError(formatAuthError(err));
+      return false;
+    }
+  };
+
+  const resendVerificationEmail = async (): Promise<boolean> => {
+    if (!auth.currentUser) return false;
+    try {
+      await sendEmailVerification(auth.currentUser);
+      showToast(t.auth.verificationSent, 'success');
+      return true;
+    } catch (err: any) {
+      showToast(formatAuthError(err), 'error');
+      return false;
+    }
+  };
+
+  const refreshAuthUser = async (): Promise<boolean> => {
+    if (!auth.currentUser) return false;
+    try {
+      await auth.currentUser.reload();
+      const reloaded = auth.currentUser;
+      setCurrentUser({ ...reloaded } as FirebaseUser);
+      setUserProfile(prev => ({ ...prev, emailVerified: reloaded.emailVerified }));
+      return reloaded.emailVerified;
+    } catch {
+      return false;
     }
   };
 
@@ -1185,22 +1935,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await signOut(auth);
       setUserProfile({
         uid: 'guest-uid',
-        email: 'viewer@svtechmedia.com',
+        email: '',
         displayName: 'Guest Viewer',
-        role: 'free_user'
+        photoURL: '',
+        role: 'free_user',
+        channelId: 'my-channel',
+        creatorStatus: 'none'
       });
     } catch (err) {
       console.warn('Sign out notice:', err);
     }
   };
 
-  // Demo role switcher to allow full testing of Super Admin, Admin, Moderator, Creator, Pro, and Free roles
-  const switchDemoRole = (role: UserRole) => {
-    setUserProfile(prev => ({
-      ...prev,
-      role
-    }));
-  };
+  const isAuthenticated = Boolean(currentUser);
 
   const markNotificationsRead = () => {
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
@@ -1226,11 +1973,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         shorts,
         playlists,
         comments,
+        posts,
         categories,
         platformSettings,
         reports,
         activityLogs,
         allUsers,
+        creatorApplications,
         transactions,
         downloads,
         likedVideoIds,
@@ -1250,6 +1999,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         editingVideo,
         downloadModalVideo,
         currentUser,
+        isAuthenticated,
+        emailVerified,
+        authLoading,
+        authError,
+        isAuthModalOpen,
+        authModalMode,
         userProfile,
         isSuperAdmin,
         isAdmin,
@@ -1259,6 +2014,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         isFreeUser,
         navigate,
         setActiveCategory,
+        accessFilter,
+        setAccessFilter,
         setSearchQuery,
         toggleSidebar,
         setSidebarOpen,
@@ -1275,6 +2032,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         likeComment,
         createPlaylist,
         toggleVideoInPlaylist,
+        removePlaylist,
+        createCommunityPost,
+        toggleLikeCommunityPost,
+        removeCommunityPost,
+        applyForCreator,
+        reviewCreatorApplication,
+        saveCategory,
+        removeCategory,
         uploadVideo,
         removeVideo,
         modifyVideoStatus,
@@ -1292,12 +2057,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         submitReport,
         resolveModerationReport,
         changeUserRole,
+        toggleUserBan,
         updateSettings,
         sendAnnouncement,
         saveChannelProfile,
         signInWithGoogle,
+        signInWithEmail,
+        signUpWithEmail,
+        sendPasswordReset,
+        resendVerificationEmail,
+        refreshAuthUser,
         signOutUser,
-        switchDemoRole,
+        setIsAuthModalOpen,
+        setAuthModalMode,
+        openAuthModal,
+        clearAuthError,
         markNotificationsRead,
         setMiniPlayerState,
         closeMiniPlayer,
@@ -1309,11 +2083,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setEditingVideo,
         setDownloadModalVideo,
         videoPurchases,
+        recentEngagementEvents,
+        sendVideoReaction,
+        trackVideoShare,
         isPurchased,
+        getPendingPurchase,
         purchaseVideo,
         approvePurchase,
         refundPurchase,
-        setVideoAccessType
+        setVideoAccessType,
+        toast,
+        showToast,
+        clearToast
       }}
     >
       {children}

@@ -10,6 +10,8 @@ export type Language = 'en' | 'am';
 
 export type VideoAccessType = 'free' | 'pro' | 'private' | 'unlisted';
 
+export type AccessFilter = 'all' | 'free' | 'pro';
+
 export interface UserProfile {
   uid: string;
   email: string;
@@ -21,6 +23,8 @@ export interface UserProfile {
   isBanned?: boolean;
   phoneNumber?: string;
   preferredLanguage?: Language;
+  emailVerified?: boolean;
+  creatorStatus?: 'none' | 'pending' | 'approved' | 'rejected';
 }
 
 export interface VideoChannel {
@@ -42,7 +46,9 @@ export interface Video {
   title: string;
   description: string;
   videoUrl: string;
+  videoStoragePath?: string;
   thumbnailUrl: string;
+  thumbnailStoragePath?: string;
   duration: number; // seconds
   durationFormatted: string;
   views: number;
@@ -77,6 +83,36 @@ export interface Video {
   publishingFeeETB?: number;
   transactionId?: string;
   isLive?: boolean;
+  // Real-time 24h Analytics & Live Reactions
+  views24h?: number;
+  likes24h?: number;
+  comments24h?: number;
+  reactionsCount?: number;
+  reactions24h?: number;
+  shares24h?: number;
+  growthRate24h?: number;
+  lastEngagedAt?: string;
+}
+
+export type ReactionType = 'heart' | 'fire' | 'clap' | 'laugh' | 'wow' | 'rocket';
+
+export interface LiveReaction {
+  id: string;
+  videoId: string;
+  emoji: string;
+  type: ReactionType;
+  userId: string;
+  userName: string;
+  videoTime: number;
+  createdAt: string;
+}
+
+export interface EngagementEvent {
+  id: string;
+  videoId: string;
+  type: 'view' | 'like' | 'comment' | 'reaction' | 'share';
+  userId: string;
+  createdAt: string;
 }
 
 export interface VideoPurchase {
@@ -122,6 +158,45 @@ export interface Comment {
   replies?: Comment[];
 }
 
+export interface ShortComment {
+  id: string;
+  shortId: string;
+  userId: string;
+  userName: string;
+  userAvatar?: string;
+  text: string;
+  createdAt: string;
+}
+
+export interface CommunityPost {
+  id: string;
+  channelId: string;
+  authorUid: string;
+  authorName: string;
+  authorAvatarUrl: string;
+  text: string;
+  imageUrl?: string;
+  likes: number;
+  likedBy?: string[];
+  createdAt: string;
+}
+
+export interface CreatorApplication {
+  id: string;
+  uid: string;
+  email: string;
+  displayName: string;
+  channelName: string;
+  channelHandle: string;
+  category: string;
+  bio: string;
+  status: 'pending' | 'approved' | 'rejected';
+  reviewedBy?: string;
+  reviewNotes?: string;
+  createdAt: string;
+  reviewedAt?: string;
+}
+
 export interface Channel {
   id: string;
   name: string;
@@ -145,7 +220,9 @@ export interface ShortItem {
   id: string;
   title: string;
   videoUrl: string;
+  videoStoragePath?: string;
   thumbnailUrl: string;
+  thumbnailStoragePath?: string;
   channel: {
     id: string;
     name: string;
@@ -179,6 +256,15 @@ export interface HistoryItem {
   videoId: string;
   watchedAt: string;
   progressPercent: number; // 0 to 100
+  lastPositionSec?: number;
+  updatedAt?: string;
+}
+
+export interface WatchHistoryDoc {
+  videoId: string;
+  progressPercent: number;
+  lastPositionSec: number;
+  updatedAt: string;
 }
 
 export interface NotificationItem {
@@ -276,6 +362,10 @@ export interface PlatformSettings {
   chapaPublicKey?: string;
   allowPublicDownloads: boolean;
   defaultLanguage: Language;
+  featuredBannerEnabled?: boolean;
+  featuredBannerTitle?: string;
+  featuredBannerText?: string;
+  featuredBannerVideoId?: string;
 }
 
 export type ViewMode =
@@ -294,4 +384,11 @@ export type ViewMode =
   | 'trending'
   | 'downloads'
   | 'purchases'
-  | 'admin';
+  | 'admin'
+  | 'creator-dashboard'
+  | 'moderator-dashboard'
+  | 'signin'
+  | 'signup'
+  | 'forgot-password'
+  | 'verify-email'
+  | 'unauthorized';

@@ -13,10 +13,32 @@ import {
   Pipette,
   Maximize2,
   PictureInPicture2,
-  Check
+  Check,
+  SmilePlus
 } from 'lucide-react';
-import { Video } from '../types';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
+import { LiveReaction, ReactionType, Video } from '../types';
 import { useApp } from '../context/AppContext';
+import { subscribeToLiveReactions } from '../services/videoService';
+
+export const LIVE_REACTION_OPTIONS: { type: ReactionType; emoji: string; label: string }[] = [
+  { type: 'heart', emoji: '❤️', label: 'Heart' },
+  { type: 'fire', emoji: '🔥', label: 'Fire' },
+  { type: 'clap', emoji: '👏', label: 'Clap' },
+  { type: 'laugh', emoji: '😂', label: 'Laugh' },
+  { type: 'wow', emoji: '😮', label: 'Wow' },
+  { type: 'rocket', emoji: '🚀', label: 'Rocket' }
+];
+
+interface FloatingReactionParticle {
+  key: string;
+  emoji: string;
+  rightPct: number;
+  driftX: number;
+  riseY: number;
+  scale: number;
+  durationSec: number;
+}
 
 interface VideoPlayerProps {
   video: Video;
@@ -24,6 +46,9 @@ interface VideoPlayerProps {
   onToggleTheater: () => void;
   onNextVideo?: () => void;
   autoPlay?: boolean;
+  initialTimeSec?: number;
+  onTimeSync?: (timeSeconds: number) => void;
+  onProgressSync?: (currentTime: number, duration: number) => void;
 }
 
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({
@@ -31,9 +56,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   isTheater,
   onToggleTheater,
   onNextVideo,
-  autoPlay = true
+  autoPlay = true,
+  initialTimeSec,
+  onTimeSync,
+  onProgressSync
 }) => {
-  const { addToHistory, setMiniPlayerState, navigate } = useApp();
+  const { addToHistory, setMiniPlayerState, navigate, sendVideoReaction, t } = useApp();
+  const prefersReducedMotion = useReducedMotion();
 
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -54,8 +83,95 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [hoverPosition, setHoverPosition] = useState<number>(0);
   const [bufferedPercent, setBufferedPercent] = useState<number>(0);
   const [playRipple, setPlayRipple] = useState<'play' | 'pause' | null>(null);
+  const [showFloatingReactions, setShowFloatingReactions] = useState<boolean>(true);
+  const [floatingReactions, setFloatingReactions] = useState<FloatingReactionParticle[]>([]);
 
   const hideTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const seenReactionIdsRef = useRef<Set<string>>(new Set());
+  const isInitialReactionLoadRef = useRef<boolean>(true);
+  const hasSeekedInitialRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    hasSeekedInitialRef.current = false;
+  }, [video.id]);
+
+  const spawnFloatingEmoji = useCallback((emoji: string, sourceId?: string) => {
+    if (sourceId) {
+      if (seenReactionIdsRef.current.has(sourceId)) return;
+      seenReactionIdsRef.current.add(sourceId);
+    }
+
+    const particle: FloatingReactionParticle = {
+      key: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      emoji,
+      rightPct: 5 + Math.random() * 18,
+      driftX: (Math.random() - 0.5) * 68,
+      riseY: 220 + Math.random() * 120,
+      scale: 0.92 + Math.random() * 0.36,
+      durationSec: 2.0 + Math.random() * 0.65
+    };
+
+    setFloatingReactions(prev => [...prev.slice(-40), particle]);
+
+    setTimeout(() => {
+      setFloatingReactions(prev => prev.filter(p => p.key !== particle.key));
+    }, 2800);
+  }, []);
+
+  // Listen to real-time live reactions (Firestore + local custom event + cross-tab BroadcastChannel)
+  useEffect(() => {
+    seenReactionIdsRef.current = new Set();
+    isInitialReactionLoadRef.current = true;
+    setFloatingReactions([]);
+
+    const unsubFirestore = subscribeToLiveReactions(video.id, reactions => {
+      if (isInitialReactionLoadRef.current) {
+        reactions.forEach(r => seenReactionIdsRef.current.add(r.id));
+        isInitialReactionLoadRef.current = false;
+        return;
+      }
+
+      const cutoff = Date.now() - 12000;
+      reactions.forEach(r => {
+        const createdMs = new Date(r.createdAt || 0).getTime();
+        if (!seenReactionIdsRef.current.has(r.id) && createdMs >= cutoff) {
+          spawnFloatingEmoji(r.emoji, r.id);
+        } else {
+          seenReactionIdsRef.current.add(r.id);
+        }
+      });
+    });
+
+    const handleLocalReaction = (e: Event) => {
+      const detail = (e as CustomEvent<LiveReaction>).detail;
+      if (detail && detail.videoId === video.id) {
+        spawnFloatingEmoji(detail.emoji, detail.id);
+      }
+    };
+
+    window.addEventListener('svtech:live-reaction', handleLocalReaction);
+
+    let bc: BroadcastChannel | null = null;
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      try {
+        bc = new BroadcastChannel('svtech_live_reactions');
+        bc.onmessage = (msg: MessageEvent<LiveReaction>) => {
+          const r = msg.data;
+          if (r && r.videoId === video.id) {
+            spawnFloatingEmoji(r.emoji, r.id);
+          }
+        };
+      } catch {
+        bc = null;
+      }
+    }
+
+    return () => {
+      unsubFirestore();
+      window.removeEventListener('svtech:live-reaction', handleLocalReaction);
+      if (bc) bc.close();
+    };
+  }, [video.id, spawnFloatingEmoji]);
 
   // Format seconds to mm:ss or hh:mm:ss
   const formatTime = (secs: number) => {
@@ -181,25 +297,44 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const handleTimeUpdate = () => {
     if (!videoRef.current) return;
     const cur = videoRef.current.currentTime;
+    const dur = videoRef.current.duration || duration;
     setCurrentTime(cur);
+    if (onTimeSync) {
+      onTimeSync(cur);
+    }
+    if (onProgressSync && dur > 0) {
+      onProgressSync(cur, dur);
+    }
 
-    // Update history progress periodically
-    if (Math.floor(cur) % 5 === 0 && duration > 0) {
-      const pct = Math.round((cur / duration) * 100);
-      addToHistory(video.id, pct);
+    // Update history progress periodically with resume timestamp
+    if (Math.floor(cur) % 5 === 0 && dur > 0) {
+      const pct = Math.round((cur / dur) * 100);
+      addToHistory(video.id, pct, cur);
     }
 
     // Buffer percentage
-    if (videoRef.current.buffered.length > 0) {
+    if (videoRef.current.buffered.length > 0 && dur > 0) {
       const bufferedEnd = videoRef.current.buffered.end(videoRef.current.buffered.length - 1);
-      setBufferedPercent((bufferedEnd / duration) * 100);
+      setBufferedPercent((bufferedEnd / dur) * 100);
     }
   };
 
   // Video loaded metadata
   const handleLoadedMetadata = () => {
     if (videoRef.current) {
-      setDuration(videoRef.current.duration || video.duration);
+      const dur = videoRef.current.duration || video.duration;
+      setDuration(dur);
+      if (
+        !hasSeekedInitialRef.current &&
+        initialTimeSec &&
+        initialTimeSec > 2 &&
+        dur > 0 &&
+        initialTimeSec < dur - 5
+      ) {
+        videoRef.current.currentTime = initialTimeSec;
+        setCurrentTime(initialTimeSec);
+        hasSeekedInitialRef.current = true;
+      }
       if (autoPlay) {
         videoRef.current.play().catch(() => setIsPlaying(false));
         setIsPlaying(true);
@@ -292,9 +427,49 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         </div>
       )}
 
+      {/* Floating Live Reactions Overlay */}
+      {showFloatingReactions && (
+        <div
+          aria-hidden="true"
+          className="absolute inset-0 pointer-events-none overflow-hidden z-20"
+        >
+          <AnimatePresence>
+            {floatingReactions.map(particle => (
+              <motion.div
+                key={particle.key}
+                initial={
+                  prefersReducedMotion
+                    ? { opacity: 0, scale: 0.9 }
+                    : { opacity: 0, y: 0, x: 0, scale: 0.6 }
+                }
+                animate={
+                  prefersReducedMotion
+                    ? { opacity: [0, 1, 0], scale: 1 }
+                    : {
+                        opacity: [0, 1, 1, 0],
+                        y: -particle.riseY,
+                        x: [0, particle.driftX * 0.45, particle.driftX],
+                        scale: [0.65, particle.scale * 1.15, particle.scale]
+                      }
+                }
+                exit={{ opacity: 0 }}
+                transition={{
+                  duration: prefersReducedMotion ? 0.9 : particle.durationSec,
+                  ease: 'easeOut'
+                }}
+                style={{ right: `${particle.rightPct}%`, bottom: '68px' }}
+                className="absolute text-2xl sm:text-3xl select-none drop-shadow-[0_2px_8px_rgba(0,0,0,0.65)] will-change-transform"
+              >
+                {particle.emoji}
+              </motion.div>
+            ))}
+          </AnimatePresence>
+        </div>
+      )}
+
       {/* CONTROLS OVERLAY (Auto-hiding) */}
       <div
-        className={`absolute inset-0 flex flex-col justify-between pointer-events-none bg-gradient-to-t from-black/80 via-transparent to-black/30 transition-opacity duration-300 ${
+        className={`absolute inset-0 z-30 flex flex-col justify-between pointer-events-none bg-gradient-to-t from-black/80 via-transparent to-black/30 transition-opacity duration-300 ${
           controlsVisible || !isPlaying ? 'opacity-100' : 'opacity-0'
         }`}
       >
@@ -307,11 +482,31 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           )}
         </div>
 
-        {/* Center click area (handled by video click) */}
-        <div className="flex-1" />
+        {/* Center click area + Quick Player Reaction Dock (bottom-right above controls) */}
+        <div className="flex-1 flex items-end justify-end px-4 pb-2">
+          {showFloatingReactions && (
+            <div
+              onClick={e => e.stopPropagation()}
+              className="pointer-events-auto hidden sm:flex items-center gap-1 px-2 py-1 rounded-full bg-black/55 backdrop-blur-md border border-white/15 shadow-lg"
+            >
+              {LIVE_REACTION_OPTIONS.map(opt => (
+                <button
+                  key={opt.type}
+                  type="button"
+                  title={opt.label}
+                  aria-label={`React ${opt.label}`}
+                  onClick={() => sendVideoReaction(video.id, opt.type, opt.emoji, currentTime)}
+                  className="w-7 h-7 rounded-full flex items-center justify-center text-base hover:bg-white/20 active:scale-125 transition-transform"
+                >
+                  {opt.emoji}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
 
         {/* Bottom Controls Bar */}
-        <div className="px-4 pb-3 pt-6 pointer-events-auto flex flex-col gap-2">
+        <div className="px-4 pb-3 pt-4 pointer-events-auto flex flex-col gap-2">
           {/* Progress / Scrubber Bar */}
           <div
             ref={progressRef}
@@ -415,6 +610,25 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
             {/* Right buttons */}
             <div className="flex items-center gap-2 sm:gap-3">
+              {/* Floating Live Reactions Visibility Toggle */}
+              <button
+                type="button"
+                onClick={() => setShowFloatingReactions(prev => !prev)}
+                title={
+                  showFloatingReactions
+                    ? t.liveReactions?.toggleOn || 'Hide floating reactions'
+                    : t.liveReactions?.toggleOff || 'Show floating reactions'
+                }
+                aria-label="Toggle live reactions"
+                className={`p-1.5 rounded transition-colors ${
+                  showFloatingReactions
+                    ? 'border-b-2 border-rose-500 text-white'
+                    : 'text-white/60 hover:text-white'
+                }`}
+              >
+                <SmilePlus className="w-5 h-5" />
+              </button>
+
               {/* Closed Captions toggle */}
               <button
                 onClick={() => setSubtitlesEnabled(!subtitlesEnabled)}

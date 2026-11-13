@@ -21,11 +21,13 @@ import {
   PhoneCall,
   Copy,
   KeyRound,
-  ExternalLink
+  ExternalLink,
+  Flag,
+  Clock
 } from 'lucide-react';
-import { Video } from '../types';
+import { ReactionType, Video } from '../types';
 import { useApp } from '../context/AppContext';
-import { VideoPlayer } from './VideoPlayer';
+import { LIVE_REACTION_OPTIONS, VideoPlayer } from './VideoPlayer';
 import { VideoCard } from './VideoCard';
 
 interface WatchPageProps {
@@ -53,18 +55,32 @@ export const WatchPage: React.FC<WatchPageProps> = ({ videoId }) => {
     t,
     currentUser,
     isPurchased,
-    purchaseVideo
+    getPendingPurchase,
+    purchaseVideo,
+    sendVideoReaction,
+    trackVideoShare,
+    watchHistory,
+    submitReport,
+    showToast,
+    openAuthModal
   } = useApp();
 
   const [isTheater, setIsTheater] = useState(false);
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const [commentInput, setCommentInput] = useState('');
   const [commentsSort, setCommentsSort] = useState<'top' | 'newest'>('top');
+  const [lastReactedEmoji, setLastReactedEmoji] = useState<string | null>(null);
+  const playerTimeRef = useRef<number>(0);
 
   // Professional Download Modal state
   const [showDownloadModal, setShowDownloadModal] = useState(false);
   const [downloadQuality, setDownloadQuality] = useState<'1080p' | '720p' | '480p' | '360p'>('1080p');
   const [isStartingDownload, setIsStartingDownload] = useState(false);
+
+  // Report Video Modal state
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportReason, setReportReason] = useState('');
+  const [isSubmittingReport, setIsSubmittingReport] = useState(false);
 
   const currentVideo = videos.find(v => v.id === videoId) || videos[0];
   const currentChannel = channels.find(c => c.id === currentVideo.channel.id) || {
@@ -99,7 +115,7 @@ export const WatchPage: React.FC<WatchPageProps> = ({ videoId }) => {
 
   const handleOpenDownload = () => {
     if (currentVideo.allowDownloads === false && !isAdmin) {
-      alert(t.watch.downloadNotAllowed);
+      showToast(t.watch.downloadNotAllowed, 'info');
       return;
     }
     setShowDownloadModal(true);
@@ -110,6 +126,19 @@ export const WatchPage: React.FC<WatchPageProps> = ({ videoId }) => {
     await startDownload(currentVideo, downloadQuality);
     setIsStartingDownload(false);
     setShowDownloadModal(false);
+  };
+
+  const handleReportSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reportReason.trim()) return;
+    setIsSubmittingReport(true);
+    try {
+      await submitReport('video', currentVideo.id, reportReason.trim(), currentVideo.title);
+      setReportReason('');
+      setShowReportModal(false);
+    } finally {
+      setIsSubmittingReport(false);
+    }
   };
 
   const formatNumber = (num: number) => {
@@ -124,14 +153,16 @@ export const WatchPage: React.FC<WatchPageProps> = ({ videoId }) => {
   ];
 
   const isPro = currentVideo.accessType === 'pro' || currentVideo.isPremium;
-  const isOwner = currentUser && currentVideo.channel.id === currentUser.uid;
+  const isOwner = currentUser && (currentVideo.ownerUid === currentUser.uid || currentVideo.channel.id === currentUser.uid);
   const isUnlocked = !isPro || (currentUser && isPurchased(currentVideo.id)) || isAdmin || isOwner;
+  const pendingPurchase = getPendingPurchase(currentVideo.id);
+  const savedHistory = watchHistory.find(h => h.videoId === currentVideo.id);
 
   // Paywall unlock transaction form states
   const [txnRefInput, setTxnRefInput] = useState('');
   const [copiedNumber, setCopiedNumber] = useState(false);
   const [isSubmittingTxn, setIsSubmittingTxn] = useState(false);
-  const [purchaseStatusMsg, setPurchaseStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [purchaseStatusMsg, setPurchaseStatusMsg] = useState<{ type: 'success' | 'info' | 'error'; text: string } | null>(null);
 
   const priceAmount = currentVideo.price || 100;
   const currencyCode = currentVideo.currency || 'ETB';
@@ -143,8 +174,17 @@ export const WatchPage: React.FC<WatchPageProps> = ({ videoId }) => {
     setTimeout(() => setCopiedNumber(false), 2000);
   };
 
+  const handleTriggerLiveReaction = async (type: ReactionType, emoji: string) => {
+    setLastReactedEmoji(emoji);
+    await sendVideoReaction(currentVideo.id, type, emoji, playerTimeRef.current);
+  };
+
   const handlePayAndUnlock = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!currentUser) {
+      openAuthModal('signin');
+      return;
+    }
     if (!txnRefInput.trim()) {
       setPurchaseStatusMsg({ type: 'error', text: 'Please enter your Telebirr transaction reference or SMS code.' });
       return;
@@ -154,9 +194,16 @@ export const WatchPage: React.FC<WatchPageProps> = ({ videoId }) => {
     try {
       const res = await purchaseVideo(currentVideo, 'telebirr', txnRefInput.trim());
       if (res && res.purchaseId) {
-        setPurchaseStatusMsg({ type: 'success', text: t.watch.unlockSuccess || 'Video unlocked successfully!' });
+        const isAlreadyVerified = res.paymentStatus === 'successful' || res.status === 'verified';
+        setPurchaseStatusMsg({
+          type: isAlreadyVerified ? 'success' : 'info',
+          text: isAlreadyVerified
+            ? t.watch.unlockSuccess
+            : t.watch.pendingVerificationDesc
+        });
+        setTxnRefInput('');
       } else {
-        setPurchaseStatusMsg({ type: 'error', text: 'Payment verification failed' });
+        setPurchaseStatusMsg({ type: 'error', text: 'Payment submission failed' });
       }
     } catch (err: any) {
       setPurchaseStatusMsg({ type: 'error', text: err?.message || 'Error recording purchase' });
@@ -258,38 +305,55 @@ export const WatchPage: React.FC<WatchPageProps> = ({ videoId }) => {
             3. Paste the confirmation Transaction Reference or SMS code below:
           </p>
 
-          {/* Form to submit transaction reference */}
-          <form onSubmit={handlePayAndUnlock} className="flex flex-col sm:flex-row gap-2 pt-1">
-            <div className="relative flex-1">
-              <KeyRound className="w-4 h-4 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={txnRefInput}
-                onChange={e => setTxnRefInput(e.target.value)}
-                placeholder="e.g. 2A4B8C1D9F (from SMS)"
-                className="w-full pl-9 pr-3 py-2 rounded-xl bg-black/80 border border-zinc-700 text-xs sm:text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
-              />
+          {/* Pending Verification Notice or Submission Form */}
+          {pendingPurchase ? (
+            <div className="p-3.5 rounded-xl bg-amber-500/15 border border-amber-500/40 text-xs text-amber-200 space-y-1.5">
+              <div className="flex items-center gap-2 font-bold text-amber-400">
+                <Clock className="w-4 h-4 shrink-0" />
+                <span>{t.watch.pendingVerification}</span>
+              </div>
+              <p className="text-zinc-300 leading-relaxed">{t.watch.pendingVerificationDesc}</p>
+              <p className="font-mono text-[11px] text-amber-300">
+                Ref: {pendingPurchase.transactionReference} · Merchant: {telebirrMerchant}
+              </p>
             </div>
-            <button
-              type="submit"
-              disabled={isSubmittingTxn}
-              className="flex items-center justify-center gap-2 px-5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-bold text-xs sm:text-sm shadow-lg shadow-amber-500/25 transition-all whitespace-nowrap"
-            >
-              <ShieldCheck className="w-4 h-4 stroke-[2.5]" />
-              <span>{isSubmittingTxn ? 'Verifying...' : 'Pay & Unlock'}</span>
-            </button>
-          </form>
+          ) : (
+            <form onSubmit={handlePayAndUnlock} className="flex flex-col sm:flex-row gap-2 pt-1">
+              <div className="relative flex-1">
+                <KeyRound className="w-4 h-4 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={txnRefInput}
+                  onChange={e => setTxnRefInput(e.target.value)}
+                  placeholder="e.g. 2A4B8C1D9F (from SMS)"
+                  className="w-full pl-9 pr-3 py-2 rounded-xl bg-black/80 border border-zinc-700 text-xs sm:text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={isSubmittingTxn}
+                className="flex items-center justify-center gap-2 px-5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-bold text-xs sm:text-sm shadow-lg shadow-amber-500/25 transition-all whitespace-nowrap"
+              >
+                <ShieldCheck className="w-4 h-4 stroke-[2.5]" />
+                <span>{isSubmittingTxn ? 'Submitting...' : 'Submit Reference'}</span>
+              </button>
+            </form>
+          )}
 
           {purchaseStatusMsg && (
             <div
               className={`p-2.5 rounded-xl text-xs flex items-center gap-2 ${
                 purchaseStatusMsg.type === 'success'
                   ? 'bg-emerald-950/80 border border-emerald-500 text-emerald-300'
+                  : purchaseStatusMsg.type === 'info'
+                  ? 'bg-amber-950/80 border border-amber-500 text-amber-200'
                   : 'bg-red-950/80 border border-red-500 text-red-300'
               }`}
             >
               {purchaseStatusMsg.type === 'success' ? (
                 <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+              ) : purchaseStatusMsg.type === 'info' ? (
+                <Clock className="w-4 h-4 shrink-0 text-amber-400" />
               ) : (
                 <AlertTriangle className="w-4 h-4 shrink-0 text-red-400" />
               )}
@@ -321,6 +385,10 @@ export const WatchPage: React.FC<WatchPageProps> = ({ videoId }) => {
               isTheater={isTheater}
               onToggleTheater={() => setIsTheater(false)}
               onNextVideo={handleNextVideo}
+              initialTimeSec={savedHistory?.lastPositionSec}
+              onTimeSync={sec => {
+                playerTimeRef.current = sec;
+              }}
             />
           ) : (
             renderLockedPaywall()
@@ -341,10 +409,54 @@ export const WatchPage: React.FC<WatchPageProps> = ({ videoId }) => {
                   isTheater={false}
                   onToggleTheater={() => setIsTheater(true)}
                   onNextVideo={handleNextVideo}
+                  initialTimeSec={savedHistory?.lastPositionSec}
+                  onTimeSync={sec => {
+                    playerTimeRef.current = sec;
+                  }}
                 />
               ) : (
                 renderLockedPaywall()
               )}
+            </div>
+          )}
+
+          {/* LIVE REACTIONS BAR */}
+          {isUnlocked && (
+            <div className="mb-4 px-3.5 py-2.5 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-900/60 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <Sparkles className="w-4 h-4 text-rose-600 shrink-0" />
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-zinc-900 dark:text-white">
+                      {t.liveReactions?.title || 'Live Reactions'}
+                    </span>
+                    <span className="text-[11px] font-mono tabular-nums text-zinc-500 dark:text-zinc-400">
+                      · {formatNumber(currentVideo.reactionsCount || 0)}{' '}
+                      {t.liveReactions?.totalReactions || 'reactions'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-zinc-500 dark:text-zinc-400 truncate">
+                    {lastReactedEmoji
+                      ? `${lastReactedEmoji} ${t.liveReactions?.justReacted || 'reacted'}`
+                      : t.liveReactions?.subtitle || 'Send real-time reactions during playback'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {LIVE_REACTION_OPTIONS.map(opt => (
+                  <button
+                    key={opt.type}
+                    type="button"
+                    onClick={() => handleTriggerLiveReaction(opt.type, opt.emoji)}
+                    title={opt.label}
+                    aria-label={`Send ${opt.label} reaction`}
+                    className="h-9 px-3 rounded-xl border border-zinc-200 dark:border-zinc-700/80 bg-white dark:bg-zinc-800/80 hover:border-rose-500/60 hover:bg-rose-50 dark:hover:bg-rose-950/30 active:scale-110 transition-all text-base flex items-center justify-center shadow-2xs cursor-pointer"
+                  >
+                    <span>{opt.emoji}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 
@@ -444,7 +556,10 @@ export const WatchPage: React.FC<WatchPageProps> = ({ videoId }) => {
 
               {/* Share button */}
               <button
-                onClick={() => setShareModalVideo(currentVideo)}
+                onClick={() => {
+                  trackVideoShare(currentVideo.id);
+                  setShareModalVideo(currentVideo);
+                }}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-full text-xs font-semibold text-zinc-700 dark:text-zinc-200 transition-colors shrink-0"
               >
                 <Share2 className="w-4 h-4" />
@@ -467,6 +582,16 @@ export const WatchPage: React.FC<WatchPageProps> = ({ videoId }) => {
               >
                 <ListPlus className="w-4 h-4" />
                 <span>{t.common.save}</span>
+              </button>
+
+              {/* Report Video */}
+              <button
+                onClick={() => (currentUser ? setShowReportModal(true) : openAuthModal('signin'))}
+                title={t.watch.reportVideo}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-full text-xs font-semibold text-zinc-700 dark:text-zinc-200 hover:text-rose-600 transition-colors shrink-0"
+              >
+                <Flag className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">{t.watch.reportVideo}</span>
               </button>
             </div>
           </div>
@@ -717,6 +842,59 @@ export const WatchPage: React.FC<WatchPageProps> = ({ videoId }) => {
                 <span>{isStartingDownload ? t.watch.downloadStarting : t.common.download}</span>
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* REPORT VIDEO MODAL */}
+      {showReportModal && (
+        <div
+          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setShowReportModal(false)}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            className="w-full max-w-md bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-2xl border border-zinc-200 dark:border-zinc-800 space-y-4"
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="font-display font-bold text-base text-zinc-950 dark:text-white flex items-center gap-2">
+                <Flag className="w-4 h-4 text-rose-600" />
+                <span>{t.watch.reportVideo}</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowReportModal(false)}
+                className="p-1 rounded-full text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={handleReportSubmit} className="space-y-4">
+              <textarea
+                rows={3}
+                required
+                value={reportReason}
+                onChange={e => setReportReason(e.target.value)}
+                placeholder={t.watch.reportReason}
+                className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-zinc-50 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-white"
+              />
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowReportModal(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                >
+                  {t.common.cancel}
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingReport}
+                  className="px-5 py-2 rounded-xl text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white disabled:opacity-50"
+                >
+                  {isSubmittingReport ? t.common.loading : t.common.submit}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

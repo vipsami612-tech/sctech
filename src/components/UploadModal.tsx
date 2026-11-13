@@ -6,23 +6,32 @@ import {
   Check,
   AlertCircle,
   FileVideo,
-  Image,
-  Clock,
+  Image as ImageIcon,
   Eye,
   Trash2,
   Lock,
-  Globe,
-  Radio,
   Play,
   CreditCard,
-  CheckCircle2,
   ShieldCheck,
-  QrCode,
-  ArrowRight
+  ArrowRight,
+  Camera,
+  Link2,
+  Loader2,
+  CheckCircle2
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { generateThumbnailSvg } from '../data/mockData';
 import { PaymentProvider } from '../types';
+import { uploadFileWithPathToStorage, validateUploadFile } from '../services/storageService';
+import { isFirebaseApiKeyConfigured } from '../services/firebase';
+import { VideoThumbnail } from './VideoThumbnail';
+import {
+  extractVideoFrame,
+  formatDuration,
+  isPlaceholderSvgUrl,
+  probeVideoSource,
+  validateThumbnailUrlFormat,
+  verifyImageUrlLoads
+} from '../services/thumbnailService';
 
 export const UploadModal: React.FC = () => {
   const {
@@ -33,11 +42,16 @@ export const UploadModal: React.FC = () => {
     editingVideo,
     setEditingVideo,
     navigate,
+    isAuthenticated,
+    currentUser,
+    userProfile,
+    openAuthModal,
     isAdmin,
     isModerator,
     initiatePublishingPayment,
     verifyPayment,
     platformSettings,
+    showToast,
     t
   } = useApp();
 
@@ -60,26 +74,66 @@ export const UploadModal: React.FC = () => {
   const [activeTransactionId, setActiveTransactionId] = useState<string | null>(null);
   const [paymentReference, setPaymentReference] = useState<string | null>(null);
 
-  // Upload Progress
+  // Upload Progress, Metadata & Thumbnail Frame Extraction state
+  const [selectedVideoFile, setSelectedVideoFile] = useState<File | null>(null);
+  const [selectedThumbFile, setSelectedThumbFile] = useState<File | null>(null);
+  const [thumbnailStoragePath, setThumbnailStoragePath] = useState<string | undefined>(undefined);
+  const [videoStoragePath, setVideoStoragePath] = useState<string | undefined>(undefined);
+  const [videoDurationSec, setVideoDurationSec] = useState<number>(0);
+  const [frameTimestampSec, setFrameTimestampSec] = useState<number>(1);
+  const [isExtractingFrame, setIsExtractingFrame] = useState(false);
+  const [frameExtractNote, setFrameExtractNote] = useState<string | null>(null);
+  const [urlCheckState, setUrlCheckState] = useState<'idle' | 'checking' | 'valid' | 'invalid'>('idle');
+  const [urlCheckMsg, setUrlCheckMsg] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [processingStatus, setProcessingStatus] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const thumbInputRef = useRef<HTMLInputElement>(null);
+  const objectUrlRef = useRef<string | null>(null);
 
   const isStaffExempt = isAdmin || isModerator;
-  const publishingFee = isStaffExempt ? 0 : (platformSettings.publishingFeeETB || 100);
+
+  const revokeLocalVideoUrl = () => {
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      revokeLocalVideoUrl();
+    };
+  }, []);
 
   // Sync if editing an existing video
   useEffect(() => {
+    setConfirmDelete(false);
+    setUploadError(null);
+    setSelectedVideoFile(null);
+    setSelectedThumbFile(null);
+    setFrameExtractNote(null);
+    setUrlCheckState('idle');
+    setUrlCheckMsg(null);
+    revokeLocalVideoUrl();
+
     if (editingVideo) {
       setTitle(editingVideo.title);
       setDescription(editingVideo.description);
       setCategory(editingVideo.category);
       setVideoUrl(editingVideo.videoUrl);
-      setThumbnailUrl(editingVideo.thumbnailUrl);
+      setThumbnailUrl(isPlaceholderSvgUrl(editingVideo.thumbnailUrl) ? '' : editingVideo.thumbnailUrl);
+      setThumbnailStoragePath(editingVideo.thumbnailStoragePath);
+      setVideoStoragePath(editingVideo.videoStoragePath);
+      setVideoDurationSec(editingVideo.duration || 60);
+      setFrameTimestampSec(
+        editingVideo.duration && editingVideo.duration > 4 ? Math.min(3, Math.floor(editingVideo.duration * 0.2)) : 1
+      );
       setTags(editingVideo.tags.join(', '));
       setStatus(editingVideo.status || 'published');
       setVisibility(editingVideo.visibility || 'public');
@@ -93,7 +147,11 @@ export const UploadModal: React.FC = () => {
       setDescription('');
       setCategory('Tech');
       setVideoUrl('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4');
-      setThumbnailUrl('');
+      setThumbnailUrl('/thumbnails/video-3.jpg');
+      setThumbnailStoragePath(undefined);
+      setVideoStoragePath(undefined);
+      setVideoDurationSec(15);
+      setFrameTimestampSec(2);
       setTags('SVTech, Streaming, 2026');
       setStatus('published');
       setVisibility('public');
@@ -111,34 +169,145 @@ export const UploadModal: React.FC = () => {
 
   if (!isUploadModalOpen) return null;
 
-  const handleVideoFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const localUrl = URL.createObjectURL(file);
-      setVideoUrl(localUrl);
-      if (!title) {
-        setTitle(file.name.replace(/\.[^/.]+$/, ''));
+  const runFrameExtraction = async (source: string, timestamp: number, markAsThumbnail: boolean) => {
+    setIsExtractingFrame(true);
+    setFrameExtractNote(t.upload.capturingFrame);
+    setUploadError(null);
+    try {
+      const result = await extractVideoFrame({
+        sourceUrl: source,
+        timestampSec: timestamp
+      });
+      if (result.duration > 0) {
+        setVideoDurationSec(result.duration);
       }
+      if (markAsThumbnail) {
+        setSelectedThumbFile(result.file);
+        setThumbnailUrl(result.previewDataUrl);
+        setThumbnailStoragePath(undefined);
+        setUrlCheckState('idle');
+        setUrlCheckMsg(null);
+      }
+      setFrameExtractNote(
+        `Captured 16:9 frame at ${formatDuration(timestamp)} (${result.width}x${result.height})`
+      );
+      return true;
+    } catch (err: any) {
+      const msg = err?.message || 'Unable to extract video frame.';
+      setFrameExtractNote(msg);
+      return false;
+    } finally {
+      setIsExtractingFrame(false);
+    }
+  };
+
+  const handleVideoFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const validation = validateUploadFile(file, 'video');
+    if (!validation.valid) {
+      setUploadError(validation.error || 'Invalid video file.');
+      showToast(validation.error || 'Invalid video file.', 'error');
+      return;
+    }
+    setUploadError(null);
+    revokeLocalVideoUrl();
+    setSelectedVideoFile(file);
+    setVideoStoragePath(undefined);
+    const localUrl = URL.createObjectURL(file);
+    objectUrlRef.current = localUrl;
+    setVideoUrl(localUrl);
+    if (!title) {
+      setTitle(file.name.replace(/\.[^/.]+$/, ''));
+    }
+
+    // Read real video duration and extract initial 16:9 frame from uploaded MP4/WebM
+    try {
+      const meta = await probeVideoSource(localUrl);
+      if (meta.duration > 0) {
+        setVideoDurationSec(meta.duration);
+        const suggestedTs = Math.max(0, Math.min(2, Math.floor(meta.duration * 0.2)));
+        setFrameTimestampSec(suggestedTs);
+        await runFrameExtraction(localUrl, suggestedTs, true);
+      } else {
+        await runFrameExtraction(localUrl, 1, true);
+      }
+    } catch {
+      await runFrameExtraction(localUrl, 1, true);
     }
   };
 
   const handleThumbnailFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === 'string') {
-          setThumbnailUrl(reader.result);
-        }
-      };
-      reader.readAsDataURL(file);
+    if (!file) return;
+    const validation = validateUploadFile(file, 'thumbnail');
+    if (!validation.valid) {
+      setUploadError(validation.error || 'Invalid thumbnail image file.');
+      showToast(validation.error || 'Invalid thumbnail image file.', 'error');
+      return;
     }
+    setUploadError(null);
+    setFrameExtractNote(null);
+    setUrlCheckState('idle');
+    setUrlCheckMsg(null);
+    setSelectedThumbFile(file);
+    setThumbnailStoragePath(undefined);
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setThumbnailUrl(reader.result);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleVerifyThumbnailUrl = async () => {
+    if (!thumbnailUrl.trim()) return;
+    setUrlCheckState('checking');
+    setUrlCheckMsg(null);
+    const res = await verifyImageUrlLoads(thumbnailUrl.trim());
+    if (res.ok) {
+      setUrlCheckState('valid');
+      setUrlCheckMsg(`${t.upload.urlVerified} (${res.width}x${res.height})`);
+      setSelectedThumbFile(null);
+      setThumbnailStoragePath(undefined);
+    } else {
+      setUrlCheckState('invalid');
+      setUrlCheckMsg(res.error || 'Image URL could not be loaded.');
+    }
+  };
+
+  const handleRemoveThumbnail = () => {
+    setThumbnailUrl('');
+    setSelectedThumbFile(null);
+    setThumbnailStoragePath('');
+    setFrameExtractNote(null);
+    setUrlCheckState('idle');
+    setUrlCheckMsg(null);
   };
 
   // Step 1 -> Step 2: Form submit or trigger payment
   const handleProceedOrPublish = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isAuthenticated) {
+      openAuthModal('signin');
+      return;
+    }
     if (!title.trim()) return;
+    if (!thumbnailUrl.trim() && !selectedThumbFile) {
+      const msg = 'Please upload a real cover image, paste an HTTPS image URL, or extract a video frame.';
+      setUploadError(msg);
+      showToast(msg, 'error');
+      return;
+    }
+    if (!selectedThumbFile && thumbnailUrl.trim() && !thumbnailUrl.startsWith('data:image/')) {
+      const fmt = validateThumbnailUrlFormat(thumbnailUrl.trim());
+      if (!fmt.valid) {
+        setUploadError(fmt.error || 'Invalid thumbnail URL.');
+        showToast(fmt.error || 'Invalid thumbnail URL.', 'error');
+        return;
+      }
+    }
 
     // If staff exempt or saving as draft, proceed to direct upload
     if (isStaffExempt || status === 'draft' || paymentStep === 'paid') {
@@ -159,41 +328,82 @@ export const UploadModal: React.FC = () => {
     setPaymentStep('verifying');
     setProcessingStatus(t.upload.verifyingPayment);
 
-    setTimeout(async () => {
-      await verifyPayment(activeTransactionId);
-      setPaymentStep('paid');
-      setProcessingStatus(t.upload.paymentConfirmed);
-      // Auto-trigger video publishing after payment verified
-      setTimeout(() => {
-        executePublish(activeTransactionId);
-      }, 500);
-    }, 1200);
+    await verifyPayment(activeTransactionId);
+    setPaymentStep('paid');
+    setProcessingStatus(t.upload.paymentConfirmed);
+    executePublish(activeTransactionId);
   };
 
   const executePublish = async (txId?: string) => {
     setIsUploading(true);
-    setUploadProgress(20);
-    setProcessingStatus('Uploading video bitstream to authorized storage...');
+    setUploadError(null);
+    setUploadProgress(10);
+    setProcessingStatus('Preparing media upload...');
 
-    setTimeout(() => {
-      setUploadProgress(65);
-      setProcessingStatus('Transcoding 1080p 60fps & verifying DRM permissions...');
-    }, 400);
+    try {
+      let resolvedVideoUrl = videoUrl.trim();
+      let resolvedVideoPath = videoStoragePath;
+      let resolvedThumbUrl = thumbnailUrl.trim();
+      let resolvedThumbPath = thumbnailStoragePath;
 
-    setTimeout(async () => {
-      setUploadProgress(90);
+      if (selectedVideoFile) {
+        if (!isFirebaseApiKeyConfigured || !currentUser) {
+          throw new Error(
+            'Local video upload to Firebase Storage requires VITE_FIREBASE_API_KEY and an authenticated account. Configure Firebase Storage or paste a direct HTTPS stream URL.'
+          );
+        }
+        setProcessingStatus('Uploading video stream to Firebase Storage...');
+        const uploadedVideo = await uploadFileWithPathToStorage({
+          file: selectedVideoFile,
+          folder: 'videos',
+          uid: currentUser.uid,
+          onProgress: pct => setUploadProgress(Math.max(10, Math.round(pct * 0.7)))
+        });
+        resolvedVideoUrl = uploadedVideo.url;
+        resolvedVideoPath = uploadedVideo.storagePath;
+      }
+
+      if (selectedThumbFile) {
+        if (!isFirebaseApiKeyConfigured || !currentUser) {
+          throw new Error(
+            'Uploading a local cover image or extracted video frame to Firebase Storage requires VITE_FIREBASE_API_KEY to be configured. Configure Storage or paste an HTTPS thumbnail URL.'
+          );
+        }
+        setProcessingStatus('Uploading 16:9 cover thumbnail to Firebase Storage...');
+        const uploadedThumb = await uploadFileWithPathToStorage({
+          file: selectedThumbFile,
+          folder: 'thumbnails',
+          uid: currentUser.uid,
+          onProgress: pct => setUploadProgress(70 + Math.round(pct * 0.2))
+        });
+        resolvedThumbUrl = uploadedThumb.url;
+        resolvedThumbPath = uploadedThumb.storagePath;
+      }
+
+      if (!resolvedThumbUrl) {
+        throw new Error('A real thumbnail image is required before saving or publishing.');
+      }
+
+      const urlCheck = validateThumbnailUrlFormat(resolvedThumbUrl);
+      if (!urlCheck.valid) {
+        throw new Error(urlCheck.error || 'Invalid thumbnail URL.');
+      }
+
+      setUploadProgress(92);
       setProcessingStatus('Committing metadata and publishing rights to Firestore...');
 
-      const finalThumb =
-        thumbnailUrl ||
-        generateThumbnailSvg(
-          title.trim(),
-          category,
-          '#1e1b4b',
-          '#0f172a',
-          '#e11d48',
-          'play'
-        );
+      const finalDuration =
+        videoDurationSec > 0
+          ? videoDurationSec
+          : editingVideo
+          ? editingVideo.duration
+          : 60;
+      const finalDurationFormatted =
+        videoDurationSec > 0
+          ? formatDuration(videoDurationSec)
+          : editingVideo
+          ? editingVideo.durationFormatted
+          : '1:00';
 
       const publishedId = await uploadVideo(
         {
@@ -201,9 +411,11 @@ export const UploadModal: React.FC = () => {
           title: title.trim(),
           description: description.trim() || 'Uploaded to SVTech Media.',
           category,
-          videoUrl,
-          thumbnailUrl: finalThumb,
-          tags: tags.split(',').map(t => t.trim()).filter(Boolean),
+          videoUrl: resolvedVideoUrl,
+          videoStoragePath: resolvedVideoPath,
+          thumbnailUrl: resolvedThumbUrl,
+          thumbnailStoragePath: resolvedThumbPath,
+          tags: tags.split(',').map(tg => tg.trim()).filter(Boolean),
           status,
           visibility,
           scheduledAt,
@@ -212,37 +424,65 @@ export const UploadModal: React.FC = () => {
           price: accessType === 'pro' ? Number(videoPrice) || 100 : 0,
           currency: 'ETB',
           isPremium: accessType === 'pro',
-          duration: editingVideo ? editingVideo.duration : 60,
-          durationFormatted: editingVideo ? editingVideo.durationFormatted : '1:00'
+          duration: finalDuration,
+          durationFormatted: finalDurationFormatted
         },
         txId
       );
 
       setUploadProgress(100);
       setProcessingStatus(t.common.published);
+      showToast(editingVideo ? 'Video updated successfully!' : 'Video published successfully!', 'success');
 
-      setTimeout(() => {
-        setIsUploading(false);
-        setIsUploadModalOpen(false);
-        setEditingVideo(null);
-        navigate('watch', { videoId: publishedId });
-      }, 600);
-    }, 900);
-  };
-
-  const handleDelete = async () => {
-    if (editingVideo && confirm(`Delete "${editingVideo.title}" permanently?`)) {
-      await removeVideo(editingVideo.id);
+      setIsUploading(false);
       setIsUploadModalOpen(false);
       setEditingVideo(null);
+      navigate('watch', { videoId: publishedId });
+    } catch (err: any) {
+      const msg = err?.message || 'Failed to publish video.';
+      setUploadError(msg);
+      setIsUploading(false);
+      showToast(msg, 'error');
     }
   };
 
+  const handleDelete = async () => {
+    if (!editingVideo) return;
+    if (!confirmDelete) {
+      setConfirmDelete(true);
+      return;
+    }
+    await removeVideo(editingVideo.id);
+    setConfirmDelete(false);
+    setIsUploadModalOpen(false);
+    setEditingVideo(null);
+  };
+
   const samplePresets = [
-    { label: '4K CGI Masterpiece', url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4' },
-    { label: 'Sci-Fi Cyberpunk VFX', url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4' },
-    { label: 'Tech Overdrive Stream', url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4' },
-    { label: 'Untamed Wilderness', url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4' }
+    {
+      label: '4K CGI Masterpiece',
+      url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+      thumb: '/thumbnails/video-1.jpg',
+      duration: 596
+    },
+    {
+      label: 'Sci-Fi Cyberpunk VFX',
+      url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
+      thumb: '/thumbnails/video-2.jpg',
+      duration: 734
+    },
+    {
+      label: 'Tech Overdrive Stream',
+      url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+      thumb: '/thumbnails/video-3.jpg',
+      duration: 15
+    },
+    {
+      label: 'Untamed Wilderness',
+      url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
+      thumb: '/thumbnails/video-4.jpg',
+      duration: 15
+    }
   ];
 
   return (
@@ -272,6 +512,43 @@ export const UploadModal: React.FC = () => {
         {/* ======================================================= */}
         {paymentStep === 'details' || paymentStep === 'paid' ? (
           <form onSubmit={handleProceedOrPublish} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto">
+            {/* Real-Time Creator Auth Identity Strip */}
+            <div className="p-3 rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700/70 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-8 h-8 rounded-full bg-zinc-900 dark:bg-zinc-700 text-white text-xs font-bold flex items-center justify-center shrink-0 overflow-hidden">
+                  {userProfile.photoURL ? (
+                    <img
+                      src={userProfile.photoURL}
+                      alt={userProfile.displayName}
+                      referrerPolicy="no-referrer"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    (userProfile.displayName || 'G').charAt(0).toUpperCase()
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-zinc-900 dark:text-white truncate">
+                    Publishing as {userProfile.displayName}
+                  </p>
+                  <p className="text-[11px] text-zinc-500 truncate">
+                    {isAuthenticated
+                      ? `Authenticated · ${userProfile.role.replace('_', ' ')}`
+                      : 'Guest session — sign in to save posts to your real-time account'}
+                  </p>
+                </div>
+              </div>
+              {!isAuthenticated && (
+                <button
+                  type="button"
+                  onClick={() => openAuthModal('signin')}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white shrink-0"
+                >
+                  {t.auth.signIn}
+                </button>
+              )}
+            </div>
+
             {/* Ethiopian Birr Publishing Fee Badge / Alert */}
             {!isStaffExempt && !editingVideo && (
               <div className="p-3.5 rounded-2xl bg-gradient-to-r from-rose-500/10 via-amber-500/10 to-rose-500/10 border border-rose-500/30 flex items-start gap-3">
@@ -337,7 +614,11 @@ export const UploadModal: React.FC = () => {
               <input
                 type="text"
                 value={videoUrl}
-                onChange={e => setVideoUrl(e.target.value)}
+                onChange={e => {
+                  setSelectedVideoFile(null);
+                  setVideoStoragePath(undefined);
+                  setVideoUrl(e.target.value);
+                }}
                 placeholder={t.upload.urlPlaceholder}
                 className="w-full px-3 py-2 rounded-xl text-xs bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-white font-mono"
               />
@@ -347,7 +628,16 @@ export const UploadModal: React.FC = () => {
                   <button
                     key={preset.label}
                     type="button"
-                    onClick={() => setVideoUrl(preset.url)}
+                    onClick={() => {
+                      revokeLocalVideoUrl();
+                      setSelectedVideoFile(null);
+                      setVideoStoragePath(undefined);
+                      setVideoUrl(preset.url);
+                      setVideoDurationSec(preset.duration);
+                      if (!selectedThumbFile && (!thumbnailUrl || thumbnailUrl.startsWith('/thumbnails/'))) {
+                        setThumbnailUrl(preset.thumb);
+                      }
+                    }}
                     className="px-2 py-0.5 rounded text-[10px] bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300"
                   >
                     {preset.label}
@@ -356,41 +646,232 @@ export const UploadModal: React.FC = () => {
               </div>
             </div>
 
-            {/* Thumbnail Chooser */}
-            <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700/60 flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                {thumbnailUrl ? (
-                  <img
-                    src={thumbnailUrl}
-                    alt=""
-                    className="w-16 aspect-video rounded-lg object-cover ring-1 ring-zinc-300 dark:ring-zinc-700"
-                  />
-                ) : (
-                  <div className="w-16 aspect-video rounded-lg bg-zinc-200 dark:bg-zinc-800 flex items-center justify-center text-zinc-400">
-                    <Image className="w-5 h-5" />
-                  </div>
-                )}
+            {/* Real Cover Image Upload + Video Frame Extractor + URL Chooser */}
+            <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700/60 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
-                  <span className="text-xs font-semibold block text-zinc-800 dark:text-zinc-200">
-                    {t.upload.thumbnail}
+                  <span className="text-xs font-semibold block text-zinc-800 dark:text-zinc-200 flex items-center gap-1.5">
+                    <ImageIcon className="w-4 h-4 text-rose-600" />
+                    <span>{t.upload.thumbnail}</span>
                   </span>
-                  <span className="text-[11px] text-zinc-400">Upload JPG/PNG or auto-generate</span>
+                  <span className="text-[11px] text-zinc-400">
+                    Upload JPG/PNG/WebP, capture a 16:9 frame from your video, or paste an image URL
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {thumbnailUrl && (
+                    <button
+                      type="button"
+                      onClick={handleRemoveThumbnail}
+                      className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                    >
+                      {t.upload.removeThumbnail}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => thumbInputRef.current?.click()}
+                    className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-zinc-200 dark:bg-zinc-700 text-zinc-800 dark:text-zinc-200 hover:bg-zinc-300 dark:hover:bg-zinc-600"
+                  >
+                    {t.upload.uploadImage}
+                  </button>
+                </div>
+                <input
+                  ref={thumbInputRef}
+                  type="file"
+                  accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+                  onChange={handleThumbnailFileSelect}
+                  className="hidden"
+                />
+              </div>
+
+              {/* Firebase Storage configuration notice when Storage is missing and local file selected */}
+              {!isFirebaseApiKeyConfigured && (selectedVideoFile || selectedThumbFile) && (
+                <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-500/40 text-[11px] text-amber-800 dark:text-amber-200 flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                  <span>{t.upload.storageNotConfiguredNotice}</span>
+                </div>
+              )}
+
+              {/* Extract 16:9 Frame From Video + Timestamp Scrubber */}
+              <div className="p-3 rounded-xl bg-white dark:bg-zinc-900/70 border border-zinc-200/80 dark:border-zinc-700/70 space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-zinc-800 dark:text-zinc-200">
+                    <Camera className="w-3.5 h-3.5 text-rose-600" />
+                    <span>{t.upload.extractFrame}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {[
+                      { label: 'Start', sec: 1 },
+                      { label: '25%', sec: Math.max(1, Math.round((videoDurationSec || 20) * 0.25)) },
+                      { label: '50%', sec: Math.max(1, Math.round((videoDurationSec || 20) * 0.5)) },
+                      { label: '75%', sec: Math.max(1, Math.round((videoDurationSec || 20) * 0.75)) }
+                    ].map(preset => (
+                      <button
+                        key={preset.label}
+                        type="button"
+                        disabled={isExtractingFrame}
+                        onClick={() => {
+                          setFrameTimestampSec(preset.sec);
+                          runFrameExtraction(videoUrl, preset.sec, true);
+                        }}
+                        className="px-2 py-0.5 rounded text-[10px] font-mono bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 disabled:opacity-50"
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2.5">
+                  <div className="flex-1 flex items-center gap-2">
+                    <span className="text-[11px] font-mono text-zinc-500 shrink-0">
+                      {formatDuration(frameTimestampSec)}
+                    </span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={Math.max(10, videoDurationSec || 60)}
+                      step={0.5}
+                      value={Math.min(frameTimestampSec, Math.max(10, videoDurationSec || 60))}
+                      onChange={e => setFrameTimestampSec(Number(e.target.value))}
+                      aria-label={t.upload.frameTimestamp}
+                      className="flex-1 accent-rose-600 cursor-pointer"
+                    />
+                    <span className="text-[11px] font-mono text-zinc-400 shrink-0">
+                      {formatDuration(Math.max(10, videoDurationSec || 60))}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={isExtractingFrame || !videoUrl}
+                    onClick={() => runFrameExtraction(videoUrl, frameTimestampSec, true)}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white disabled:opacity-50 inline-flex items-center justify-center gap-1.5 shrink-0"
+                  >
+                    {isExtractingFrame ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>{t.upload.capturingFrame}</span>
+                      </>
+                    ) : (
+                      <>
+                        <Camera className="w-3.5 h-3.5" />
+                        <span>{t.upload.captureAtTimestamp}</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {frameExtractNote && (
+                  <p className="text-[11px] text-zinc-500 dark:text-zinc-400">{frameExtractNote}</p>
+                )}
+              </div>
+
+              {/* Direct Image URL + Live Verification */}
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <Link2 className="w-3.5 h-3.5 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={thumbnailUrl.startsWith('data:') ? '' : thumbnailUrl}
+                      onChange={e => {
+                        setSelectedThumbFile(null);
+                        setThumbnailStoragePath(undefined);
+                        setUrlCheckState('idle');
+                        setUrlCheckMsg(null);
+                        setThumbnailUrl(e.target.value);
+                      }}
+                      placeholder="Paste cover image URL (https://... or /thumbnails/...)"
+                      className="w-full pl-8 pr-3 py-2 rounded-xl text-xs bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-white font-mono"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    disabled={!thumbnailUrl.trim() || thumbnailUrl.startsWith('data:') || urlCheckState === 'checking'}
+                    onClick={handleVerifyThumbnailUrl}
+                    className="px-3 py-2 rounded-xl text-xs font-semibold bg-zinc-200 dark:bg-zinc-700 hover:bg-zinc-300 dark:hover:bg-zinc-600 text-zinc-800 dark:text-zinc-200 disabled:opacity-50 shrink-0"
+                  >
+                    {urlCheckState === 'checking' ? t.common.loading : t.upload.verifyUrl}
+                  </button>
+                </div>
+
+                {urlCheckMsg && (
+                  <p
+                    className={`text-[11px] flex items-center gap-1 ${
+                      urlCheckState === 'valid'
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : 'text-rose-600 dark:text-rose-400'
+                    }`}
+                  >
+                    {urlCheckState === 'valid' ? (
+                      <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                    ) : (
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                    )}
+                    <span>{urlCheckMsg}</span>
+                  </p>
+                )}
+              </div>
+
+              {/* Live 16:9 Post Card Preview showing Cover, Price & Content Title */}
+              <div className="pt-2 border-t border-zinc-200/80 dark:border-zinc-700/60">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 block mb-2">
+                  Live 16:9 Thumbnail Preview ({selectedThumbFile ? `Local File: ${selectedThumbFile.name}` : thumbnailStoragePath ? `Storage: ${thumbnailStoragePath}` : 'Image URL'})
+                </span>
+                <div className="flex flex-col sm:flex-row gap-3 items-start">
+                  <div className="relative w-full sm:w-52 aspect-video rounded-xl overflow-hidden bg-zinc-900 shrink-0 border border-zinc-200/70 dark:border-zinc-700/70">
+                    <VideoThumbnail
+                      src={thumbnailUrl}
+                      alt={title || 'Video cover preview'}
+                      fallbackLabel="No thumbnail selected"
+                    />
+
+                    {/* Preview Price / Tier Overlay */}
+                    <div className="absolute top-2 left-2 flex items-center gap-1">
+                      {accessType === 'pro' ? (
+                        <>
+                          <span className="flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500 text-black text-[10px] font-black uppercase">
+                            <Lock className="w-2.5 h-2.5 stroke-[2.5]" />
+                            PRO
+                          </span>
+                          <span className="px-1.5 py-0.5 rounded bg-zinc-950/90 text-amber-400 text-[10px] font-mono tabular-nums font-bold">
+                            {Number(videoPrice) || 100} ETB
+                          </span>
+                        </>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded bg-emerald-600/95 text-white text-[10px] font-bold uppercase">
+                          FREE
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded bg-black/85 text-white text-[10px] font-mono tabular-nums">
+                      {formatDuration(videoDurationSec || (editingVideo ? editingVideo.duration : 60))}
+                    </div>
+                  </div>
+
+                  <div className="flex-1 min-w-0 space-y-1">
+                    <h4 className="font-display font-semibold text-sm text-zinc-900 dark:text-white line-clamp-2 leading-snug">
+                      {title.trim() || 'Your Content Title Appears Here'}
+                    </h4>
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400 truncate">
+                      {userProfile.displayName} · {category}
+                    </p>
+                    <div className="text-xs font-mono tabular-nums font-bold">
+                      {accessType === 'pro' ? (
+                        <span className="text-amber-600 dark:text-amber-400">
+                          Price: {Number(videoPrice) || 100} ETB
+                        </span>
+                      ) : (
+                        <span className="text-emerald-600 dark:text-emerald-400">
+                          Price: Free
+                        </span>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => thumbInputRef.current?.click()}
-                className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-zinc-200 dark:bg-zinc-700 text-zinc-800 dark:text-zinc-200 hover:bg-zinc-300"
-              >
-                {t.upload.uploadImage}
-              </button>
-              <input
-                ref={thumbInputRef}
-                type="file"
-                accept="image/*"
-                onChange={handleThumbnailFileSelect}
-                className="hidden"
-              />
             </div>
 
             {/* Visibility & Status & Category */}
@@ -640,17 +1121,39 @@ export const UploadModal: React.FC = () => {
               </div>
             )}
 
+            {uploadError && (
+              <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-500/40 text-xs text-rose-700 dark:text-rose-300 flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-600" />
+                <span>{uploadError}</span>
+              </div>
+            )}
+
             {/* Footer Buttons */}
             <div className="flex items-center justify-between pt-4 border-t border-zinc-200 dark:border-zinc-800">
               {editingVideo ? (
-                <button
-                  type="button"
-                  onClick={handleDelete}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40"
-                >
-                  <Trash2 className="w-4 h-4" />
-                  <span>{t.upload.deleteVideo}</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleDelete}
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold ${
+                      confirmDelete
+                        ? 'bg-rose-600 text-white hover:bg-rose-700'
+                        : 'text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40'
+                    }`}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>{confirmDelete ? 'Confirm Permanent Delete' : t.upload.deleteVideo}</span>
+                  </button>
+                  {confirmDelete && (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDelete(false)}
+                      className="px-2.5 py-1.5 rounded-lg text-xs text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                    >
+                      {t.common.cancel}
+                    </button>
+                  )}
+                </div>
               ) : <div />}
 
               <div className="flex items-center gap-3">
@@ -666,7 +1169,7 @@ export const UploadModal: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  disabled={isUploading}
+                  disabled={isUploading || !isAuthenticated}
                   className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white shadow-md transition-all disabled:opacity-50"
                 >
                   <Upload className="w-4 h-4" />

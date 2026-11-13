@@ -1,44 +1,16 @@
-import { initializeApp } from 'firebase/app';
-import {
-  getAuth,
-  GoogleAuthProvider,
-  signInWithPopup,
-  signOut,
-  onAuthStateChanged,
-  User as FirebaseUser
-} from 'firebase/auth';
+import { initializeApp, getApps, getApp } from 'firebase/app';
+import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 import {
   getFirestore,
   doc,
   getDocFromServer,
   collection,
-  onSnapshot,
   setDoc,
-  updateDoc,
-  deleteDoc,
   addDoc,
-  getDocs,
-  query,
-  orderBy,
-  limit,
-  where,
-  serverTimestamp,
-  increment
+  getDocs
 } from 'firebase/firestore';
-import firebaseConfig from '../../firebase-applet-config.json';
-import {
-  Video,
-  Channel,
-  ShortItem,
-  Playlist,
-  Comment,
-  NotificationItem,
-  UserProfile,
-  ReportItem,
-  ActivityLog,
-  PlatformSettings,
-  CategoryItem
-} from '../types';
+import { getStorage } from 'firebase/storage';
+import { PlatformSettings, CategoryItem } from '../types';
 import {
   INITIAL_VIDEOS,
   INITIAL_CHANNELS,
@@ -48,15 +20,29 @@ import {
   INITIAL_NOTIFICATIONS
 } from '../data/mockData';
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
+const env = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env : ({} as Record<string, string>);
+const configuredApiKey = (env.VITE_FIREBASE_API_KEY || '').trim();
 
-// CRITICAL per Firebase Skill: Pass firestoreDatabaseId explicitly
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+export const isFirebaseApiKeyConfigured = Boolean(configuredApiKey);
+
+export const firebaseConfig = {
+  apiKey: configuredApiKey || 'MISSING_VITE_FIREBASE_API_KEY',
+  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || 'svtech-meddia.firebaseapp.com',
+  databaseURL: env.VITE_FIREBASE_DATABASE_URL || 'https://svtech-meddia-default-rtdb.firebaseio.com',
+  projectId: env.VITE_FIREBASE_PROJECT_ID || 'svtech-meddia',
+  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || 'svtech-meddia.firebasestorage.app',
+  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || '73334221451',
+  appId: env.VITE_FIREBASE_APP_ID || '1:73334221451:web:1bb2cbb50d5a1756b8428e',
+  measurementId: env.VITE_FIREBASE_MEASUREMENT_ID || 'G-0R7V6C5JS8'
+};
+
+// Initialize Firebase for svtech-meddia without inventing any custom database ID
+export const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+export const db = getFirestore(app);
 export const auth = getAuth(app);
+export const storage = getStorage(app);
 export const googleProvider = new GoogleAuthProvider();
 
-// Error handling conforming to Firebase Integration Skill
 export enum OperationType {
   CREATE = 'create',
   UPDATE = 'update',
@@ -104,8 +90,11 @@ export function handleFirestoreError(
   return new Error(JSON.stringify(errInfo));
 }
 
-// Connection test per SKILL.md
 export async function testConnection() {
+  if (!isFirebaseApiKeyConfigured) {
+    console.warn('VITE_FIREBASE_API_KEY is not set. Configure .env for live svtech-meddia Firebase requests.');
+    return;
+  }
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
   } catch (error) {
@@ -115,17 +104,16 @@ export async function testConnection() {
   }
 }
 
-// Default Platform Categories
 export const DEFAULT_CATEGORIES: CategoryItem[] = [
-  { id: 'cat-all', name: 'All', slug: 'all' },
-  { id: 'cat-animation', name: 'Animation', slug: 'animation' },
-  { id: 'cat-scifi', name: 'Sci-Fi', slug: 'sci-fi' },
-  { id: 'cat-gaming', name: 'Gaming', slug: 'gaming' },
-  { id: 'cat-tech', name: 'Tech', slug: 'tech' },
-  { id: 'cat-automotive', name: 'Automotive', slug: 'automotive' },
-  { id: 'cat-travel', name: 'Travel', slug: 'travel' },
-  { id: 'cat-coding', name: 'Coding', slug: 'coding' },
-  { id: 'cat-music', name: 'Music', slug: 'music' }
+  { id: 'cat-all', name: 'All', nameAm: 'ሁሉም', slug: 'all' },
+  { id: 'cat-animation', name: 'Animation', nameAm: 'አኒሜሽን', slug: 'animation' },
+  { id: 'cat-scifi', name: 'Sci-Fi', nameAm: 'ሳይንስ', slug: 'sci-fi' },
+  { id: 'cat-gaming', name: 'Gaming', nameAm: 'ጨዋታዎች', slug: 'gaming' },
+  { id: 'cat-tech', name: 'Tech', nameAm: 'ቴክኖሎጂ', slug: 'tech' },
+  { id: 'cat-automotive', name: 'Automotive', nameAm: 'መኪና እና ቴክኖሎጂ', slug: 'automotive' },
+  { id: 'cat-travel', name: 'Travel', nameAm: 'ጉዞ እና ባህል', slug: 'travel' },
+  { id: 'cat-coding', name: 'Coding', nameAm: 'ፕሮግራሚንግ', slug: 'coding' },
+  { id: 'cat-music', name: 'Music', nameAm: 'ሙዚቃ', slug: 'music' }
 ];
 
 export const DEFAULT_SETTINGS: PlatformSettings = {
@@ -139,20 +127,20 @@ export const DEFAULT_SETTINGS: PlatformSettings = {
   allowFreeCreatorUploads: false,
   proPlanMonthlyETB: 500,
   enabledPaymentProviders: ['telebirr', 'cbe_birr', 'chapa'],
+  telebirrMerchantId: '0913767842',
   allowPublicDownloads: true,
-  defaultLanguage: 'en'
+  defaultLanguage: 'en',
+  featuredBannerEnabled: false,
+  featuredBannerTitle: '',
+  featuredBannerText: '',
+  featuredBannerVideoId: ''
 };
 
-/**
- * Initialize Firestore data if collections are empty so SVTech Media is populated immediately.
- */
 export async function initializeFirestoreDatabase(adminEmail: string) {
+  if (!isFirebaseApiKeyConfigured) return;
   try {
     const videoSnap = await getDocs(collection(db, 'videos'));
     if (videoSnap.empty) {
-      console.log('Seeding initial SVTech Media catalog to Firestore...');
-
-      // Seed Channels
       for (const ch of INITIAL_CHANNELS) {
         await setDoc(doc(db, 'channels', ch.id), {
           ...ch,
@@ -160,7 +148,6 @@ export async function initializeFirestoreDatabase(adminEmail: string) {
         });
       }
 
-      // Seed Videos
       for (const vid of INITIAL_VIDEOS) {
         await setDoc(doc(db, 'videos', vid.id), {
           ...vid,
@@ -172,7 +159,6 @@ export async function initializeFirestoreDatabase(adminEmail: string) {
         });
       }
 
-      // Seed Shorts
       for (const sh of INITIAL_SHORTS) {
         await setDoc(doc(db, 'shorts', sh.id), {
           ...sh,
@@ -182,7 +168,6 @@ export async function initializeFirestoreDatabase(adminEmail: string) {
         });
       }
 
-      // Seed Comments
       for (const [vId, cList] of Object.entries(INITIAL_COMMENTS)) {
         for (const c of cList) {
           await setDoc(doc(db, 'comments', c.id), {
@@ -194,7 +179,6 @@ export async function initializeFirestoreDatabase(adminEmail: string) {
         }
       }
 
-      // Seed Playlists
       for (const pl of INITIAL_PLAYLISTS) {
         await setDoc(doc(db, 'playlists', pl.id), {
           ...pl,
@@ -202,7 +186,6 @@ export async function initializeFirestoreDatabase(adminEmail: string) {
         });
       }
 
-      // Seed Notifications
       for (const notif of INITIAL_NOTIFICATIONS) {
         await setDoc(doc(db, 'notifications', notif.id), {
           ...notif,
@@ -210,10 +193,8 @@ export async function initializeFirestoreDatabase(adminEmail: string) {
         });
       }
 
-      // Seed Platform Settings
       await setDoc(doc(db, 'platformSettings', 'global'), DEFAULT_SETTINGS);
 
-      // Seed First Activity Log
       await addDoc(collection(db, 'activityLogs'), {
         adminEmail,
         action: 'PLATFORM_INITIALIZED',

@@ -1,58 +1,5 @@
 import { Video, Channel, ShortItem, Playlist, NotificationItem } from '../types';
 
-// Helper to generate a rich SVG data URI thumbnail
-export function generateThumbnailSvg(
-  title: string,
-  category: string,
-  gradientStart: string,
-  gradientEnd: string,
-  accentColor: string,
-  iconType: 'play' | 'code' | 'game' | 'film' | 'car' | 'mountain' | 'sparkle'
-): string {
-  const iconSvg = {
-    play: `<polygon points="40,25 70,45 40,65" fill="${accentColor}" />`,
-    code: `<path d="M35 30 L20 45 L35 60 M65 30 L80 45 L65 60 M55 25 L45 65" stroke="${accentColor}" stroke-width="4" stroke-linecap="round" fill="none" />`,
-    game: `<rect x="25" y="32" width="50" height="28" rx="8" fill="none" stroke="${accentColor}" stroke-width="4" /><circle cx="40" cy="46" r="3" fill="${accentColor}"/><circle cx="60" cy="46" r="3" fill="${accentColor}"/>`,
-    film: `<rect x="25" y="28" width="50" height="34" rx="4" fill="none" stroke="${accentColor}" stroke-width="3" /><circle cx="50" cy="45" r="8" fill="${accentColor}"/>`,
-    car: `<path d="M25 50 L35 34 L65 34 L75 50 Z M30 50 A 6 6 0 0 0 42 50 M58 50 A 6 6 0 0 0 70 50" stroke="${accentColor}" stroke-width="3.5" fill="none"/>`,
-    mountain: `<path d="M20 58 L45 28 L60 45 L70 34 L85 58 Z" fill="none" stroke="${accentColor}" stroke-width="4" stroke-linejoin="round"/>`,
-    sparkle: `<path d="M50 20 L54 38 L72 42 L54 46 L50 64 L46 46 L28 42 L46 38 Z" fill="${accentColor}"/>`
-  }[iconType];
-
-  const svg = `
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" width="100%" height="100%">
-    <defs>
-      <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-        <stop offset="0%" stop-color="${gradientStart}" />
-        <stop offset="100%" stop-color="${gradientEnd}" />
-      </linearGradient>
-      <linearGradient id="overlay" x1="0%" y1="0%" x2="0%" y2="100%">
-        <stop offset="40%" stop-color="transparent" />
-        <stop offset="100%" stop-color="rgba(0,0,0,0.85)" />
-      </linearGradient>
-      <pattern id="grid" width="30" height="30" patternUnits="userSpaceOnUse">
-        <path d="M 30 0 L 0 0 0 30" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
-      </pattern>
-    </defs>
-    <rect width="640" height="360" fill="url(#bgGrad)" />
-    <rect width="640" height="360" fill="url(#grid)" />
-    <g transform="translate(270, 95) scale(1.0)">
-      <circle cx="50" cy="45" r="42" fill="rgba(0,0,0,0.4)" stroke="rgba(255,255,255,0.15)" stroke-width="2"/>
-      ${iconSvg}
-    </g>
-    <rect width="640" height="360" fill="url(#overlay)" />
-    <text x="36" y="52" fill="${accentColor}" font-family="system-ui, sans-serif" font-size="14" font-weight="700" letter-spacing="2">${category.toUpperCase()}</text>
-    <text x="36" y="300" fill="#ffffff" font-family="system-ui, sans-serif" font-size="24" font-weight="800" text-anchor="start">
-      ${title.length > 36 ? title.substring(0, 34) + '...' : title}
-    </text>
-    <text x="36" y="328" fill="rgba(255,255,255,0.7)" font-family="system-ui, sans-serif" font-size="13" font-weight="500">
-      SVTECH MEDIA ORIGINAL · 4K 60FPS
-    </text>
-  </svg>`;
-
-  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-}
-
 export const INITIAL_CHANNELS: Channel[] = [
   {
     id: 'blender-foundation',
@@ -152,14 +99,7 @@ export const INITIAL_VIDEOS: Video[] = [
     title: 'Big Buck Bunny - 4K 60FPS CGI Open Animation Remastered',
     description: `A large and lovable rabbit deals with bullying forest creatures in this legendary open-source CGI animated classic produced by the Blender Foundation.\n\nRendered in Blender with cycles ray-tracing and full dynamic fur simulation. Experience the crisp 4K color grading, Dolby Atmos master soundmix, and hilarious woodland antics.\n\nTimestamps:\n0:00 - Sunrise in the Forest\n2:15 - Meet the Bully Trio\n5:10 - The Golden Carrot Trap\n8:00 - The Bunny Strikes Back\n9:20 - Credits & Open Art Assets`,
     videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-    thumbnailUrl: generateThumbnailSvg(
-      'Big Buck Bunny 4K Remaster',
-      'Animation',
-      '#064e3b',
-      '#022c22',
-      '#34d399',
-      'film'
-    ),
+    thumbnailUrl: '/thumbnails/video-1.jpg',
     duration: 596,
     durationFormatted: '9:56',
     views: 1245030,
@@ -186,21 +126,21 @@ export const INITIAL_VIDEOS: Video[] = [
     commentsCount: 1420,
     accessType: 'free',
     price: 0,
-    isPremium: false
+    isPremium: false,
+    views24h: 142800,
+    likes24h: 11400,
+    comments24h: 390,
+    reactionsCount: 4820,
+    reactions24h: 1640,
+    shares24h: 520,
+    growthRate24h: 34.6
   },
   {
     id: 'video-2',
     title: 'Tears of Steel - High Budget Cyberpunk Sci-Fi Short Film',
     description: `Set in a dystopian Amsterdam future, a group of scientists and warriors attempt to save the earth from rogue cybernetic tentacles using holographic time reconstruction.\n\nFeaturing cutting-edge open VFX pipelines, realistic robotic compositing, and full live-action motion matching.\n\nDirected by Ian Hubert. Produced by Ton Roosendaal.\nFree software used: Blender, GIMP, Krita, Inkscape.`,
     videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
-    thumbnailUrl: generateThumbnailSvg(
-      'Tears of Steel: Cyberpunk Amsterdam',
-      'Sci-Fi',
-      '#1e1b4b',
-      '#0f172a',
-      '#38bdf8',
-      'sparkle'
-    ),
+    thumbnailUrl: '/thumbnails/video-2.jpg',
     duration: 734,
     durationFormatted: '12:14',
     views: 890400,
@@ -227,21 +167,21 @@ export const INITIAL_VIDEOS: Video[] = [
     accessType: 'pro',
     price: 100,
     currency: 'ETB',
-    isPremium: true
+    isPremium: true,
+    views24h: 98400,
+    likes24h: 8200,
+    comments24h: 245,
+    reactionsCount: 3150,
+    reactions24h: 1120,
+    shares24h: 310,
+    growthRate24h: 41.2
   },
   {
     id: 'video-3',
     title: 'Next-Gen Full Stack TypeScript Architecture (2026 Edition)',
     description: `How top engineering teams build scalable, ultra-responsive web applications with TypeScript, React 19, Tailwind CSS v4, and edge-native caching.\n\nWe break down folder architecture, composable state stores, zero-latency optimistic updates, and robust media streaming pipelines without performance bottlenecks.\n\nSource code repository linked on GitHub!`,
     videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-    thumbnailUrl: generateThumbnailSvg(
-      'Full Stack TS Architecture 2026',
-      'Coding',
-      '#1e293b',
-      '#090d16',
-      '#60a5fa',
-      'code'
-    ),
+    thumbnailUrl: '/thumbnails/video-3.jpg',
     duration: 15,
     durationFormatted: '0:15',
     views: 312000,
@@ -263,21 +203,21 @@ export const INITIAL_VIDEOS: Video[] = [
       { title: 'State Flow & Microservices', time: 6 },
       { title: 'Production Benchmarks', time: 12 }
     ],
-    commentsCount: 340
+    commentsCount: 340,
+    views24h: 118500,
+    likes24h: 9400,
+    comments24h: 412,
+    reactionsCount: 3890,
+    reactions24h: 1950,
+    shares24h: 640,
+    growthRate24h: 68.4
   },
   {
     id: 'video-4',
     title: 'Earth Unbounded: Untamed Mountain Expeditions & Wilderness 4K',
     description: `Immerse yourself in breathtaking 4K panoramic views of remote mountain ranges, crystal-clear glacial streams, and untouched forests.\n\nFilmed over 6 months across Patagonia, the Swiss Alps, and the Canadian Rockies with high-altitude cinema drones and medium-format sensors. Perfect for ambient focus, relaxation, or high-definition screen testing.`,
     videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
-    thumbnailUrl: generateThumbnailSvg(
-      'Untamed Mountain Wilderness 4K',
-      'Travel',
-      '#134e4a',
-      '#042f2e',
-      '#2dd4bf',
-      'mountain'
-    ),
+    thumbnailUrl: '/thumbnails/video-4.jpg',
     duration: 15,
     durationFormatted: '0:15',
     views: 540900,
@@ -303,21 +243,21 @@ export const INITIAL_VIDEOS: Video[] = [
     accessType: 'pro',
     price: 150,
     currency: 'ETB',
-    isPremium: true
+    isPremium: true,
+    views24h: 45200,
+    likes24h: 4100,
+    comments24h: 110,
+    reactionsCount: 1480,
+    reactions24h: 420,
+    shares24h: 185,
+    growthRate24h: 19.8
   },
   {
     id: 'video-5',
     title: 'Next-Gen Ray-Tracing Gaming Rig: 240FPS at 4K Ultrawide',
     description: `We pushed the latest quantum cooling liquid loop to the limit to benchmark AAA gaming titles at maximum ultra fidelity with path tracing enabled.\n\nWatch frame-time consistency analysis, thermal monitoring graphs, and side-by-side gameplay fidelity captures. Is 240Hz at 4K finally attainable for consumer rigs?`,
     videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4',
-    thumbnailUrl: generateThumbnailSvg(
-      '4K 240FPS Ultimate Gaming Rig',
-      'Gaming',
-      '#4c0519',
-      '#1c040d',
-      '#fb7185',
-      'game'
-    ),
+    thumbnailUrl: '/thumbnails/video-5.jpg',
     duration: 60,
     durationFormatted: '1:00',
     views: 940000,
@@ -339,21 +279,21 @@ export const INITIAL_VIDEOS: Video[] = [
       { title: 'Liquid Loop Cooling Rig', time: 20 },
       { title: '4K Path Tracing Benchmarks', time: 42 }
     ],
-    commentsCount: 978
+    commentsCount: 978,
+    views24h: 186400,
+    likes24h: 15200,
+    comments24h: 615,
+    reactionsCount: 6420,
+    reactions24h: 2840,
+    shares24h: 810,
+    growthRate24h: 52.3
   },
   {
     id: 'video-6',
     title: 'Track Day Showdown: 1,000HP Supercars Pushed to Redline',
     description: `Pure unadulterated naturally aspirated V10 and twin-turbo V8 engine roars. We took four world-class hypercars to the Nürburgring for timed sector laps and telemetry comparisons.\n\nOn-board pedal cameras, tire temperature heatmaps, and telemetry data synchronized in 4K high frame rate.`,
     videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4',
-    thumbnailUrl: generateThumbnailSvg(
-      '1,000HP Track Day Showdown',
-      'Automotive',
-      '#431407',
-      '#1a0601',
-      '#fb923c',
-      'car'
-    ),
+    thumbnailUrl: '/thumbnails/video-6.jpg',
     duration: 15,
     durationFormatted: '0:15',
     views: 1120000,
@@ -375,21 +315,21 @@ export const INITIAL_VIDEOS: Video[] = [
       { title: 'Carousel High-G Cornering', time: 7 },
       { title: 'Final Straight Top Speed', time: 12 }
     ],
-    commentsCount: 1130
+    commentsCount: 1130,
+    views24h: 164900,
+    likes24h: 13100,
+    comments24h: 480,
+    reactionsCount: 5110,
+    reactions24h: 2150,
+    shares24h: 690,
+    growthRate24h: 44.7
   },
   {
     id: 'video-7',
     title: 'Sintel - The Legendary Fantasy Animated Dragon Quest',
     description: `The emotional journey of a lonely young girl searching the desert wasteland for her stolen companion dragon.\n\nCreated by the Blender Institute with an international team of open-source animators. Featuring grand fantasy landscapes, dramatic aerial combat, and an unforgettable story twist.`,
     videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4',
-    thumbnailUrl: generateThumbnailSvg(
-      'Sintel: The Dragon Quest 4K',
-      'Animation',
-      '#311042',
-      '#13061c',
-      '#c084fc',
-      'film'
-    ),
+    thumbnailUrl: '/thumbnails/video-7.jpg',
     duration: 52,
     durationFormatted: '0:52',
     views: 2480000,
@@ -411,21 +351,21 @@ export const INITIAL_VIDEOS: Video[] = [
       { title: 'Memory of Scales', time: 20 },
       { title: 'The Gate of Ismr', time: 40 }
     ],
-    commentsCount: 3120
+    commentsCount: 3120,
+    views24h: 74500,
+    likes24h: 6300,
+    comments24h: 190,
+    reactionsCount: 2940,
+    reactions24h: 610,
+    shares24h: 230,
+    growthRate24h: 14.5
   },
   {
     id: 'video-8',
     title: 'Extreme Stress Testing: Can Hardware Survive 100°C Heat?',
     description: `What happens when cooling pumps fail under full GPU & CPU synthetic load? We disabled all chassis fans and measured throttle curves, solder joints, and emergency safety cutoff thresholds.\n\nWarning: Do not try this at home! All equipment tested inside fireproof isolation chambers.`,
     videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4',
-    thumbnailUrl: generateThumbnailSvg(
-      'Hardware Thermal Stress Test',
-      'Tech',
-      '#450a0a',
-      '#180303',
-      '#f87171',
-      'sparkle'
-    ),
+    thumbnailUrl: '/thumbnails/video-8.jpg',
     duration: 15,
     durationFormatted: '0:15',
     views: 410000,
@@ -447,21 +387,21 @@ export const INITIAL_VIDEOS: Video[] = [
       { title: 'Thermal runaway at 98C', time: 6 },
       { title: 'Emergency Cutoff Trigger', time: 11 }
     ],
-    commentsCount: 420
+    commentsCount: 420,
+    views24h: 129600,
+    likes24h: 10800,
+    comments24h: 350,
+    reactionsCount: 4100,
+    reactions24h: 2290,
+    shares24h: 590,
+    growthRate24h: 79.1
   },
   {
     id: 'video-9',
     title: 'Transcontinental Rally: 3,000 Miles Across American Highways',
     description: `A non-stop rally adventure traversing 12 states in 72 hours. From coastal highways to desert flats, experience the camaraderie, roadside pit stops, and mechanical endurance of long-distance rallying.`,
     videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/WeAreGoingOnBullrun.mp4',
-    thumbnailUrl: generateThumbnailSvg(
-      'Transcontinental Rally Tour',
-      'Automotive',
-      '#361204',
-      '#140702',
-      '#f97316',
-      'car'
-    ),
+    thumbnailUrl: '/thumbnails/video-9.jpg',
     duration: 47,
     durationFormatted: '0:47',
     views: 672000,
@@ -483,21 +423,21 @@ export const INITIAL_VIDEOS: Video[] = [
       { title: 'Desert Interstate Night Cruise', time: 22 },
       { title: 'Finish Line in Los Angeles', time: 38 }
     ],
-    commentsCount: 680
+    commentsCount: 680,
+    views24h: 51300,
+    likes24h: 3900,
+    comments24h: 140,
+    reactionsCount: 1850,
+    reactions24h: 530,
+    shares24h: 195,
+    growthRate24h: 22.4
   },
   {
     id: 'video-10',
     title: 'Overlanding & Wild Camping Across Rocky Mountain Trails',
     description: `Taking an all-wheel-drive overland rig deep into the backcountry. We navigate river crossings, muddy forest switchbacks, and set up camp under a pristine canopy of stars.\n\nTips on off-grid power management, solar setups, and trail recovery gear.`,
     videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4',
-    thumbnailUrl: generateThumbnailSvg(
-      'Rocky Mountain Overlanding',
-      'Travel',
-      '#14532d',
-      '#052e16',
-      '#4ade80',
-      'mountain'
-    ),
+    thumbnailUrl: '/thumbnails/video-10.jpg',
     duration: 594,
     durationFormatted: '9:54',
     views: 780500,
@@ -519,21 +459,21 @@ export const INITIAL_VIDEOS: Video[] = [
       { title: 'River Crossing Technique', time: 210 },
       { title: 'Basecamp Setup & Stargazing', time: 480 }
     ],
-    commentsCount: 710
+    commentsCount: 710,
+    views24h: 38900,
+    likes24h: 2800,
+    comments24h: 95,
+    reactionsCount: 1290,
+    reactions24h: 310,
+    shares24h: 140,
+    growthRate24h: 16.2
   },
   {
     id: 'video-11',
     title: 'Elephants Dream - Surreal Sci-Fi Clockwork Machine World',
     description: `The very first open movie created by the Blender Foundation! Follow Proog and Emo as they navigate an infinitely complex mechanical machine where reality bends to perception.\n\nGroundbreaking open-source history with a brilliant philosophical narrative.`,
     videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
-    thumbnailUrl: generateThumbnailSvg(
-      'Elephants Dream Clockwork',
-      'Sci-Fi',
-      '#1f2937',
-      '#030712',
-      '#a78bfa',
-      'film'
-    ),
+    thumbnailUrl: '/thumbnails/video-11.jpg',
     duration: 653,
     durationFormatted: '10:53',
     views: 1890000,
@@ -555,21 +495,21 @@ export const INITIAL_VIDEOS: Video[] = [
       { title: 'The Telephone Gallery', time: 240 },
       { title: 'The Cable Room Climax', time: 520 }
     ],
-    commentsCount: 2210
+    commentsCount: 2210,
+    views24h: 62100,
+    likes24h: 4950,
+    comments24h: 165,
+    reactionsCount: 2420,
+    reactions24h: 490,
+    shares24h: 210,
+    growthRate24h: 12.8
   },
   {
     id: 'video-12',
     title: 'Budget Car Rescue Challenge: Can You Buy a Fun Runner for $1,000?',
     description: `Can an ultra-cheap used car survive a 500-mile endurance test and a track lap without throwing a rod? We scour classifieds, inspect rust buckets, and fix up an unexpected road warrior.`,
     videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/WhatCarCanYouGetForAGrand.mp4',
-    thumbnailUrl: generateThumbnailSvg(
-      '$1,000 Budget Car Challenge',
-      'Automotive',
-      '#292524',
-      '#0c0a09',
-      '#facc15',
-      'car'
-    ),
+    thumbnailUrl: '/thumbnails/video-12.jpg',
     duration: 560,
     durationFormatted: '9:20',
     views: 920000,
@@ -591,7 +531,14 @@ export const INITIAL_VIDEOS: Video[] = [
       { title: 'Junkyard Repairs', time: 260 },
       { title: 'The 500 Mile Endurance Test', time: 480 }
     ],
-    commentsCount: 1390
+    commentsCount: 1390,
+    views24h: 88200,
+    likes24h: 7100,
+    comments24h: 260,
+    reactionsCount: 3120,
+    reactions24h: 980,
+    shares24h: 340,
+    growthRate24h: 28.9
   }
 ];
 
@@ -600,7 +547,7 @@ export const INITIAL_SHORTS: ShortItem[] = [
     id: 'short-1',
     title: 'When your CSS flexbox centers perfectly on the first try 🔥 #coding #shorts',
     videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-    thumbnailUrl: generateThumbnailSvg('CSS Flexbox Magic', 'Shorts', '#1e1b4b', '#030712', '#38bdf8', 'code'),
+    thumbnailUrl: '/thumbnails/short-1.jpg',
     channel: {
       id: 'cyber-code-craft',
       name: 'Crafting Code & Web',
@@ -617,7 +564,7 @@ export const INITIAL_SHORTS: ShortItem[] = [
     id: 'short-2',
     title: 'Secret 3D lighting setup used by Pixar animators 💡 #blender #3d',
     videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4',
-    thumbnailUrl: generateThumbnailSvg('Pixar 3D Lighting Secret', 'Shorts', '#064e3b', '#022c22', '#34d399', 'film'),
+    thumbnailUrl: '/thumbnails/short-2.jpg',
     channel: {
       id: 'blender-foundation',
       name: 'Blender Foundation',
@@ -634,7 +581,7 @@ export const INITIAL_SHORTS: ShortItem[] = [
     id: 'short-3',
     title: 'Cold start exhaust note of an 800HP sequential turbo V8! 🏎️💨',
     videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4',
-    thumbnailUrl: generateThumbnailSvg('Cold Start V8 Roar', 'Shorts', '#431407', '#1a0601', '#fb923c', 'car'),
+    thumbnailUrl: '/thumbnails/short-3.jpg',
     channel: {
       id: 'supercar-rally',
       name: 'Apex Rally & Track',
@@ -651,7 +598,7 @@ export const INITIAL_SHORTS: ShortItem[] = [
     id: 'short-4',
     title: 'Camping under the Northern Lights in sub-zero wilderness 🌌❄️',
     videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
-    thumbnailUrl: generateThumbnailSvg('Aurora Wilderness Camp', 'Shorts', '#134e4a', '#042f2e', '#2dd4bf', 'mountain'),
+    thumbnailUrl: '/thumbnails/short-4.jpg',
     channel: {
       id: 'nature-unbounded',
       name: 'Earth Unbounded',

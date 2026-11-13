@@ -11,19 +11,34 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function userExists() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function isNotBanned() {
+      return !userExists() || userDoc().data.isBanned != true;
+    }
+
     function isAdmin() {
       return isSignedIn() && (
         request.auth.token.email == "vipsami612@gmail.com" ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'super_admin'])
+        (userExists() && userDoc().data.role in ['admin', 'super_admin'])
       );
     }
 
     function isModerator() {
       return isAdmin() || (
-        isSignedIn() &&
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'moderator'
+        isSignedIn() && userExists() && userDoc().data.role == 'moderator'
+      );
+    }
+
+    function isCreator() {
+      return isModerator() || (
+        isSignedIn() && isNotBanned() && userExists() && userDoc().data.role == 'creator'
       );
     }
 
@@ -31,61 +46,116 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == uid;
     }
 
-    // Videos
+    // Videos (Private videos restricted to owner & staff)
     match /videos/{videoId} {
-      allow read: if true;
-      allow create: if isSignedIn();
-      allow update: if isAdmin() ||
-        (isSignedIn() && resource.data.ownerUid == request.auth.uid) ||
-        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['views', 'likes', 'dislikes']));
+      allow read: if resource.data.visibility != 'private' ||
+        isAdmin() ||
+        isModerator() ||
+        (isSignedIn() && resource.data.ownerUid == request.auth.uid);
+      allow create: if isSignedIn() && isNotBanned() &&
+        (request.resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow update: if isAdmin() || isModerator() ||
+        (isSignedIn() && isNotBanned() && resource.data.ownerUid == request.auth.uid) ||
+        (isSignedIn() && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'views',
+          'likes',
+          'dislikes',
+          'commentsCount',
+          'views24h',
+          'likes24h',
+          'comments24h',
+          'reactionsCount',
+          'reactions24h',
+          'shares24h',
+          'lastEngagedAt'
+        ]));
       allow delete: if isAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid);
     }
 
     // Channels
     match /channels/{channelId} {
       allow read: if true;
-      allow create: if isSignedIn();
+      allow create: if isSignedIn() && isNotBanned();
       allow update: if isAdmin() ||
-        (isSignedIn() && resource.data.ownerUid == request.auth.uid) ||
-        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['subscribers', 'subscriberCountNumber', 'totalViews', 'videosCount']));
+        (isSignedIn() && isNotBanned() && (resource.data.ownerUid == request.auth.uid || channelId == ('ch_' + request.auth.uid.slice(0, 10)))) ||
+        (isSignedIn() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['subscribers', 'subscriberCountNumber', 'totalViews', 'videosCount']));
       allow delete: if isAdmin();
     }
 
-    // Shorts
+    // Community Posts (Channel Community Tab)
+    match /posts/{postId} {
+      allow read: if true;
+      allow create: if isSignedIn() && isNotBanned() && request.resource.data.authorUid == request.auth.uid;
+      allow update: if isAdmin() ||
+        (isSignedIn() && resource.data.authorUid == request.auth.uid) ||
+        (isSignedIn() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes', 'likedBy']));
+      allow delete: if isAdmin() || isModerator() || (isSignedIn() && resource.data.authorUid == request.auth.uid);
+    }
+
+    // Shorts & Short Comments
     match /shorts/{shortId} {
       allow read: if true;
-      allow create: if isSignedIn();
+      allow create: if isSignedIn() && isNotBanned();
       allow update: if isAdmin() ||
         (isSignedIn() && resource.data.ownerUid == request.auth.uid) ||
-        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes', 'commentsCount']));
+        (isSignedIn() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes', 'commentsCount']));
       allow delete: if isAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid);
     }
 
-    // Comments
-    match /comments/{commentId} {
+    match /shortComments/{commentId} {
       allow read: if true;
-      allow create: if isSignedIn();
-      allow update: if isAdmin() || isModerator() ||
-        (isSignedIn() && resource.data.userId == request.auth.uid) ||
-        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes']));
+      allow create: if isSignedIn() && isNotBanned() && request.resource.data.userId == request.auth.uid;
       allow delete: if isAdmin() || isModerator() || (isSignedIn() && resource.data.userId == request.auth.uid);
     }
 
-    // Users
+    // Video Comments
+    match /comments/{commentId} {
+      allow read: if true;
+      allow create: if isSignedIn() && isNotBanned();
+      allow update: if isAdmin() || isModerator() ||
+        (isSignedIn() && resource.data.author.userId == request.auth.uid) ||
+        (isSignedIn() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes']));
+      allow delete: if isAdmin() || isModerator() || (isSignedIn() && resource.data.author.userId == request.auth.uid);
+    }
+
+    // Users & Private Watch History Subcollection
     match /users/{userId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn() && request.auth.uid == userId;
+      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin() || isModerator());
+      allow create: if isSignedIn() && request.auth.uid == userId && (
+        request.auth.token.email == "vipsami612@gmail.com" ||
+        request.resource.data.role == 'free_user'
+      );
       allow update: if isAdmin() || (
         isSignedIn() && request.auth.uid == userId &&
-        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role'])
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'isBanned'])
       );
       allow delete: if isAdmin();
+
+      match /watchHistory/{videoId} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+
+    // Creator Applications (Pending -> Admin Approval)
+    match /creatorApplications/{appId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow create: if isSignedIn() && isNotBanned() &&
+        request.resource.data.uid == request.auth.uid &&
+        request.resource.data.status == 'pending';
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Categories
+    match /categories/{categoryId} {
+      allow read: if true;
+      allow write: if isAdmin();
     }
 
     // Playlists
     match /playlists/{playlistId} {
-      allow read: if true;
-      allow create: if isSignedIn();
+      allow read: if resource.data.isPrivate != true || isAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid);
+      allow create: if isSignedIn() && isNotBanned() && request.resource.data.ownerUid == request.auth.uid;
       allow update: if isAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid);
       allow delete: if isAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid);
     }
@@ -93,7 +163,7 @@ service cloud.firestore {
     // Reports
     match /reports/{reportId} {
       allow read: if isModerator();
-      allow create: if isSignedIn();
+      allow create: if isSignedIn() && isNotBanned();
       allow update, delete: if isModerator();
     }
 
@@ -104,12 +174,13 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
-    // Transactions (Ethiopian Birr Publishing Fees)
+    // Transactions (Ethiopian Birr Publishing Fees — strict pending creation, Admin verifies)
     match /transactions/{transactionId} {
       allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
-      allow create: if isSignedIn();
-      allow update: if isAdmin();
-      allow delete: if isAdmin();
+      allow create: if isSignedIn() && isNotBanned() &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.status == 'pending';
+      allow update, delete: if isAdmin();
     }
 
     // Platform Settings
@@ -118,19 +189,62 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    // Video Purchases (PRO Video Watch-to-Unlock)
+    // Video Purchases (PRO Watch-to-Unlock — pending creation, Admin verifies before unlock)
     match /videoPurchases/{purchaseId} {
       allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
-      allow create: if isSignedIn();
-      allow update: if isAdmin();
-      allow delete: if isAdmin();
+      allow create: if isSignedIn() && isNotBanned() &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.status == 'pending' &&
+        request.resource.data.paymentStatus == 'pending';
+      allow update, delete: if isAdmin();
     }
 
     // Notifications
     match /notifications/{notificationId} {
       allow read: if true;
-      allow create: if isSignedIn();
+      allow create: if isAdmin() || isModerator();
       allow update, delete: if isAdmin();
+    }
+
+    // Live Reactions (Real-time Video Player Reactions)
+    function isValidLiveReaction(data) {
+      return data.keys().hasAll(['id', 'videoId', 'emoji', 'type', 'userId', 'userName', 'videoTime', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'videoId', 'emoji', 'type', 'userId', 'userName', 'videoTime', 'createdAt']) &&
+        data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+        data.videoId is string && data.videoId.size() > 0 && data.videoId.size() <= 128 &&
+        data.emoji is string && data.emoji.size() > 0 && data.emoji.size() <= 16 &&
+        data.type in ['heart', 'fire', 'clap', 'laugh', 'wow', 'rocket'] &&
+        data.userId is string && data.userId.size() > 0 && data.userId.size() <= 128 &&
+        data.userName is string && data.userName.size() <= 100 &&
+        data.videoTime is number && data.videoTime >= 0 &&
+        data.createdAt is string && data.createdAt.size() <= 64;
+    }
+
+    match /liveReactions/{reactionId} {
+      allow read: if true;
+      allow create: if isSignedIn() && isNotBanned() &&
+        request.resource.data.userId == request.auth.uid &&
+        isValidLiveReaction(request.resource.data);
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+    }
+
+    // 24h Engagement Events (Real-time Trending Analytics)
+    function isValidEngagementEvent(data) {
+      return data.keys().hasAll(['id', 'videoId', 'type', 'userId', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'videoId', 'type', 'userId', 'createdAt']) &&
+        data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+        data.videoId is string && data.videoId.size() > 0 && data.videoId.size() <= 128 &&
+        data.type in ['view', 'like', 'comment', 'reaction', 'share'] &&
+        data.userId is string && data.userId.size() > 0 && data.userId.size() <= 128 &&
+        data.createdAt is string && data.createdAt.size() <= 64;
+    }
+
+    match /engagementEvents/{eventId} {
+      allow read: if true;
+      allow create: if isSignedIn() && isNotBanned() &&
+        request.resource.data.userId == request.auth.uid &&
+        isValidEngagementEvent(request.resource.data);
+      allow delete: if isAdmin();
     }
   }
 }

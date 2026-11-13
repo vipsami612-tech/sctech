@@ -7,13 +7,13 @@ import {
   updateDoc,
   deleteDoc,
   query,
-  orderBy,
   where,
   increment,
   getDocs,
   getDoc
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from './firebase';
+import { auth, db, handleFirestoreError, OperationType } from './firebase';
+import { toMillis } from './domainHelpers';
 import {
   Video,
   Channel,
@@ -27,14 +27,17 @@ import {
   PlatformSettings,
   UserRole,
   PaymentTransaction,
-  DownloadRecord,
   VideoPurchase,
-  VideoAccessType
+  VideoAccessType,
+  ReactionType,
+  LiveReaction,
+  EngagementEvent
 } from '../types';
+
+export { toMillis };
 
 /**
  * Real-time listener for Videos collection
- * Avoids strict composite index requirements by sorting safely in memory
  */
 export function subscribeToVideos(callback: (videos: Video[]) => void) {
   return onSnapshot(
@@ -44,10 +47,9 @@ export function subscribeToVideos(callback: (videos: Video[]) => void) {
         id: d.id,
         ...d.data()
       })) as Video[];
-      // Client-side sort by createdAt desc safely
       vids.sort((a, b) => {
-        const timeA = new Date(a.createdAt || a.uploadDate || 0).getTime();
-        const timeB = new Date(b.createdAt || b.uploadDate || 0).getTime();
+        const timeA = toMillis(a.createdAt) || toMillis(a.uploadDate);
+        const timeB = toMillis(b.createdAt) || toMillis(b.uploadDate);
         return timeB - timeA;
       });
       callback(vids);
@@ -88,11 +90,7 @@ export function subscribeToShorts(callback: (shorts: ShortItem[]) => void) {
         id: d.id,
         ...d.data()
       })) as ShortItem[];
-      shs.sort((a, b) => {
-        const timeA = new Date(a.createdAt || 0).getTime();
-        const timeB = new Date(b.createdAt || 0).getTime();
-        return timeB - timeA;
-      });
+      shs.sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
       callback(shs);
     },
     error => {
@@ -120,18 +118,30 @@ export function subscribeToPlaylists(callback: (playlists: Playlist[]) => void) 
   );
 }
 
+export async function savePlaylistToFirestore(playlist: Playlist): Promise<void> {
+  try {
+    await setDoc(doc(db, 'playlists', playlist.id), playlist, { merge: true });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `playlists/${playlist.id}`);
+  }
+}
+
+export async function deletePlaylistFromFirestore(playlistId: string): Promise<void> {
+  try {
+    await deleteDoc(doc(db, 'playlists', playlistId));
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, `playlists/${playlistId}`);
+  }
+}
+
 /**
  * Real-time listener for Comments on a specific video
- * Avoids Firestore composite query index errors by querying on videoId and sorting locally
  */
 export function subscribeToVideoComments(
   videoId: string,
   callback: (comments: Comment[]) => void
 ) {
-  const q = query(
-    collection(db, 'comments'),
-    where('videoId', '==', videoId)
-  );
+  const q = query(collection(db, 'comments'), where('videoId', '==', videoId));
   return onSnapshot(
     q,
     snapshot => {
@@ -139,11 +149,7 @@ export function subscribeToVideoComments(
         id: d.id,
         ...d.data()
       })) as Comment[];
-      cmts.sort((a, b) => {
-        const timeA = new Date(a.timestamp || 0).getTime();
-        const timeB = new Date(b.timestamp || 0).getTime();
-        return timeB - timeA;
-      });
+      cmts.sort((a, b) => toMillis(b.timestamp) - toMillis(a.timestamp));
       callback(cmts);
     },
     error => {
@@ -152,9 +158,6 @@ export function subscribeToVideoComments(
   );
 }
 
-/**
- * Real-time listener for ALL comments (Admin / Moderation)
- */
 export function subscribeToAllComments(callback: (comments: Comment[]) => void) {
   return onSnapshot(
     collection(db, 'comments'),
@@ -163,11 +166,7 @@ export function subscribeToAllComments(callback: (comments: Comment[]) => void) 
         id: d.id,
         ...d.data()
       })) as Comment[];
-      cmts.sort((a, b) => {
-        const timeA = new Date(a.timestamp || 0).getTime();
-        const timeB = new Date(b.timestamp || 0).getTime();
-        return timeB - timeA;
-      });
+      cmts.sort((a, b) => toMillis(b.timestamp) - toMillis(a.timestamp));
       callback(cmts);
     },
     error => {
@@ -176,9 +175,6 @@ export function subscribeToAllComments(callback: (comments: Comment[]) => void) 
   );
 }
 
-/**
- * Real-time listener for Notifications
- */
 export function subscribeToNotifications(callback: (notifs: NotificationItem[]) => void) {
   return onSnapshot(
     collection(db, 'notifications'),
@@ -187,11 +183,7 @@ export function subscribeToNotifications(callback: (notifs: NotificationItem[]) 
         id: d.id,
         ...d.data()
       })) as NotificationItem[];
-      notifs.sort((a, b) => {
-        const timeA = new Date(a.createdAt || 0).getTime();
-        const timeB = new Date(b.createdAt || 0).getTime();
-        return timeB - timeA;
-      });
+      notifs.sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
       callback(notifs);
     },
     error => {
@@ -200,9 +192,6 @@ export function subscribeToNotifications(callback: (notifs: NotificationItem[]) 
   );
 }
 
-/**
- * Real-time listener for Moderation Reports (Admin)
- */
 export function subscribeToReports(callback: (reports: ReportItem[]) => void) {
   return onSnapshot(
     collection(db, 'reports'),
@@ -211,11 +200,7 @@ export function subscribeToReports(callback: (reports: ReportItem[]) => void) {
         id: d.id,
         ...d.data()
       })) as ReportItem[];
-      reps.sort((a, b) => {
-        const timeA = new Date(a.createdAt || 0).getTime();
-        const timeB = new Date(b.createdAt || 0).getTime();
-        return timeB - timeA;
-      });
+      reps.sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
       callback(reps);
     },
     error => {
@@ -224,9 +209,6 @@ export function subscribeToReports(callback: (reports: ReportItem[]) => void) {
   );
 }
 
-/**
- * Real-time listener for Platform Activity Logs (Admin)
- */
 export function subscribeToActivityLogs(callback: (logs: ActivityLog[]) => void) {
   return onSnapshot(
     collection(db, 'activityLogs'),
@@ -235,11 +217,7 @@ export function subscribeToActivityLogs(callback: (logs: ActivityLog[]) => void)
         id: d.id,
         ...d.data()
       })) as ActivityLog[];
-      lgs.sort((a, b) => {
-        const timeA = new Date(a.timestamp || 0).getTime();
-        const timeB = new Date(b.timestamp || 0).getTime();
-        return timeB - timeA;
-      });
+      lgs.sort((a, b) => toMillis(b.timestamp) - toMillis(a.timestamp));
       callback(lgs);
     },
     error => {
@@ -248,9 +226,6 @@ export function subscribeToActivityLogs(callback: (logs: ActivityLog[]) => void)
   );
 }
 
-/**
- * Real-time listener for Users and Roles (Admin)
- */
 export function subscribeToUsers(callback: (users: UserProfile[]) => void) {
   return onSnapshot(
     collection(db, 'users'),
@@ -267,9 +242,28 @@ export function subscribeToUsers(callback: (users: UserProfile[]) => void) {
   );
 }
 
-/**
- * Real-time listener for Platform Settings
- */
+export function subscribeToUserProfile(
+  uid: string,
+  callback: (profile: UserProfile | null) => void
+) {
+  return onSnapshot(
+    doc(db, 'users', uid),
+    snapshot => {
+      if (!snapshot.exists()) {
+        callback(null);
+        return;
+      }
+      callback({
+        uid: snapshot.id,
+        ...snapshot.data()
+      } as UserProfile);
+    },
+    error => {
+      handleFirestoreError(error, OperationType.GET, `users/${uid}`);
+    }
+  );
+}
+
 export function subscribeToPlatformSettings(callback: (settings: PlatformSettings) => void) {
   return onSnapshot(
     doc(db, 'platformSettings', 'global'),
@@ -284,9 +278,6 @@ export function subscribeToPlatformSettings(callback: (settings: PlatformSetting
   );
 }
 
-/**
- * Real-time listener for Ethiopian Birr Transactions
- */
 export function subscribeToTransactions(callback: (transactions: PaymentTransaction[]) => void) {
   return onSnapshot(
     collection(db, 'transactions'),
@@ -295,7 +286,7 @@ export function subscribeToTransactions(callback: (transactions: PaymentTransact
         id: d.id,
         ...d.data()
       })) as PaymentTransaction[];
-      txs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      txs.sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
       callback(txs);
     },
     error => {
@@ -304,9 +295,27 @@ export function subscribeToTransactions(callback: (transactions: PaymentTransact
   );
 }
 
-/**
- * Real-time listener for User Video Purchases (PRO watch unlock)
- */
+export function subscribeToUserTransactions(
+  uid: string,
+  callback: (transactions: PaymentTransaction[]) => void
+) {
+  const q = query(collection(db, 'transactions'), where('userId', '==', uid));
+  return onSnapshot(
+    q,
+    snapshot => {
+      const txs = snapshot.docs.map(d => ({
+        id: d.id,
+        ...d.data()
+      })) as PaymentTransaction[];
+      txs.sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
+      callback(txs);
+    },
+    error => {
+      handleFirestoreError(error, OperationType.LIST, `transactions/${uid}`);
+    }
+  );
+}
+
 export function subscribeToVideoPurchases(callback: (purchases: VideoPurchase[]) => void) {
   return onSnapshot(
     collection(db, 'videoPurchases'),
@@ -317,14 +326,86 @@ export function subscribeToVideoPurchases(callback: (purchases: VideoPurchase[])
         ...d.data()
       })) as VideoPurchase[];
       purches.sort((a, b) => {
-        const timeB = new Date(b.createdAt || b.purchasedAt || 0).getTime();
-        const timeA = new Date(a.createdAt || a.purchasedAt || 0).getTime();
+        const timeB = toMillis(b.createdAt) || toMillis(b.purchasedAt);
+        const timeA = toMillis(a.createdAt) || toMillis(a.purchasedAt);
         return timeB - timeA;
       });
       callback(purches);
     },
     error => {
       handleFirestoreError(error, OperationType.LIST, 'videoPurchases');
+    }
+  );
+}
+
+export function subscribeToUserVideoPurchases(
+  uid: string,
+  callback: (purchases: VideoPurchase[]) => void
+) {
+  const q = query(collection(db, 'videoPurchases'), where('userId', '==', uid));
+  return onSnapshot(
+    q,
+    snapshot => {
+      const purches = snapshot.docs.map(d => ({
+        id: d.id,
+        purchaseId: d.id,
+        ...d.data()
+      })) as VideoPurchase[];
+      purches.sort((a, b) => {
+        const timeB = toMillis(b.createdAt) || toMillis(b.purchasedAt);
+        const timeA = toMillis(a.createdAt) || toMillis(a.purchasedAt);
+        return timeB - timeA;
+      });
+      callback(purches);
+    },
+    error => {
+      handleFirestoreError(error, OperationType.LIST, `videoPurchases/${uid}`);
+    }
+  );
+}
+
+export function subscribeToLiveReactions(
+  videoId: string,
+  callback: (reactions: LiveReaction[]) => void
+) {
+  const q = query(collection(db, 'liveReactions'), where('videoId', '==', videoId));
+  return onSnapshot(
+    q,
+    snapshot => {
+      const items = snapshot.docs.map(d => ({
+        id: d.id,
+        ...d.data()
+      })) as LiveReaction[];
+      items.sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
+      callback(items);
+    },
+    error => {
+      handleFirestoreError(error, OperationType.LIST, `liveReactions/${videoId}`);
+    }
+  );
+}
+
+export function subscribeToEngagementEvents24h(
+  callback: (events: EngagementEvent[]) => void
+) {
+  return onSnapshot(
+    collection(db, 'engagementEvents'),
+    snapshot => {
+      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+      const items = snapshot.docs
+        .map(d => ({
+          id: d.id,
+          ...d.data()
+        }))
+        .filter((ev: any) => {
+          const ts = toMillis(ev.createdAt);
+          return ts > 0 && ts >= cutoff;
+        }) as EngagementEvent[];
+      items.sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
+      callback(items);
+    },
+    error => {
+      handleFirestoreError(error, OperationType.LIST, 'engagementEvents');
     }
   );
 }
@@ -336,8 +417,9 @@ export async function createOrUpdateVideo(
 ): Promise<string> {
   try {
     const videoId = videoData.id || `video_${Date.now()}`;
-    const payload: Partial<Video> = {
+    const rawPayload: Record<string, any> = {
       ...videoData,
+      id: videoId,
       status: videoData.status || 'published',
       visibility: videoData.visibility || 'public',
       views: videoData.views ?? 0,
@@ -348,8 +430,11 @@ export async function createOrUpdateVideo(
       updatedAt: new Date().toISOString()
     };
     if (!videoData.createdAt) {
-      payload.createdAt = new Date().toISOString();
+      rawPayload.createdAt = new Date().toISOString();
     }
+    const payload = Object.fromEntries(
+      Object.entries(rawPayload).filter(([, value]) => value !== undefined)
+    );
 
     await setDoc(doc(db, 'videos', videoId), payload, { merge: true });
     return videoId;
@@ -400,11 +485,35 @@ export async function toggleVideoFeatured(
   }
 }
 
+async function writeEngagementEventIfSignedIn(
+  videoId: string,
+  type: EngagementEvent['type']
+): Promise<void> {
+  const uid = auth.currentUser?.uid;
+  if (!uid) return;
+  try {
+    const eventId = `ev_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const eventDoc: EngagementEvent = {
+      id: eventId,
+      videoId,
+      type,
+      userId: uid,
+      createdAt: new Date().toISOString()
+    };
+    await setDoc(doc(db, 'engagementEvents', eventId), eventDoc);
+  } catch (err) {
+    console.debug('Engagement event notice:', err);
+  }
+}
+
 export async function incrementVideoViews(videoId: string): Promise<void> {
   try {
     await updateDoc(doc(db, 'videos', videoId), {
-      views: increment(1)
+      views: increment(1),
+      views24h: increment(1),
+      lastEngagedAt: new Date().toISOString()
     });
+    await writeEngagementEventIfSignedIn(videoId, 'view');
   } catch (err) {
     console.debug('View increment notice:', err);
   }
@@ -415,12 +524,76 @@ export async function updateVideoLikes(
   delta: number
 ): Promise<void> {
   try {
-    await updateDoc(doc(db, 'videos', videoId), {
-      likes: increment(delta)
-    });
+    const updatePayload: Record<string, any> = {
+      likes: increment(delta),
+      lastEngagedAt: new Date().toISOString()
+    };
+    if (delta > 0) {
+      updatePayload.likes24h = increment(delta);
+    }
+    await updateDoc(doc(db, 'videos', videoId), updatePayload);
+    if (delta > 0) {
+      await writeEngagementEventIfSignedIn(videoId, 'like');
+    }
   } catch (err) {
     handleFirestoreError(err, OperationType.UPDATE, `videos/${videoId}`);
   }
+}
+
+export async function incrementVideoShares(videoId: string): Promise<void> {
+  try {
+    await updateDoc(doc(db, 'videos', videoId), {
+      shares24h: increment(1),
+      lastEngagedAt: new Date().toISOString()
+    });
+    await writeEngagementEventIfSignedIn(videoId, 'share');
+  } catch (err) {
+    console.debug('Share increment notice:', err);
+  }
+}
+
+export async function sendLiveReaction(payload: {
+  videoId: string;
+  emoji: string;
+  type: ReactionType;
+  userId: string;
+  userName: string;
+  videoTime: number;
+}): Promise<LiveReaction> {
+  const nowIso = new Date().toISOString();
+  const reactionId = `react_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const signedUid = auth.currentUser?.uid;
+  const reaction: LiveReaction = {
+    id: reactionId,
+    videoId: payload.videoId,
+    emoji: payload.emoji,
+    type: payload.type,
+    userId: signedUid || payload.userId || 'guest',
+    userName: payload.userName || 'Viewer',
+    videoTime: Number.isFinite(payload.videoTime) ? Math.max(0, Math.round(payload.videoTime)) : 0,
+    createdAt: nowIso
+  };
+
+  if (signedUid) {
+    try {
+      await setDoc(doc(db, 'liveReactions', reactionId), reaction);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, `liveReactions/${reactionId}`);
+    }
+  }
+
+  try {
+    await updateDoc(doc(db, 'videos', payload.videoId), {
+      reactionsCount: increment(1),
+      reactions24h: increment(1),
+      lastEngagedAt: nowIso
+    });
+    await writeEngagementEventIfSignedIn(payload.videoId, 'reaction');
+  } catch (err) {
+    console.debug('Video reaction counter notice:', err);
+  }
+
+  return reaction;
 }
 
 // ================= SHORTS MUTATIONS =================
@@ -428,12 +601,17 @@ export async function updateVideoLikes(
 export async function createShort(shortData: Partial<ShortItem>): Promise<string> {
   try {
     const shortId = shortData.id || `short_${Date.now()}`;
-    await setDoc(doc(db, 'shorts', shortId), {
+    const rawPayload: Record<string, any> = {
       ...shortData,
+      id: shortId,
       likes: shortData.likes ?? 0,
       commentsCount: shortData.commentsCount ?? 0,
-      createdAt: new Date().toISOString()
-    });
+      createdAt: shortData.createdAt || new Date().toISOString()
+    };
+    const payload = Object.fromEntries(
+      Object.entries(rawPayload).filter(([, value]) => value !== undefined)
+    );
+    await setDoc(doc(db, 'shorts', shortId), payload, { merge: true });
     return shortId;
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, 'shorts');
@@ -510,10 +688,12 @@ export async function postComment(
       status: 'active'
     });
 
-    // Increment video comment count
     await updateDoc(doc(db, 'videos', videoId), {
-      commentsCount: increment(1)
+      commentsCount: increment(1),
+      comments24h: increment(1),
+      lastEngagedAt: new Date().toISOString()
     });
+    await writeEngagementEventIfSignedIn(videoId, 'comment');
 
     return commentId;
   } catch (err) {
@@ -591,11 +771,105 @@ export async function logPlatformActivity(adminEmail: string, action: string, de
   }
 }
 
+export async function createOrSyncUserProfile(profile: UserProfile): Promise<void> {
+  try {
+    const userRef = doc(db, 'users', profile.uid);
+    const snap = await getDoc(userRef);
+    if (!snap.exists()) {
+      await setDoc(userRef, {
+        uid: profile.uid,
+        email: profile.email,
+        displayName: profile.displayName,
+        photoURL: profile.photoURL || '',
+        role: profile.role,
+        channelId: profile.channelId || `ch_${profile.uid.slice(0, 10)}`,
+        creatorStatus: profile.creatorStatus || 'none',
+        emailVerified: Boolean(profile.emailVerified),
+        createdAt: profile.createdAt || new Date().toISOString()
+      });
+    } else {
+      await updateDoc(userRef, {
+        email: profile.email,
+        displayName: profile.displayName,
+        ...(profile.photoURL ? { photoURL: profile.photoURL } : {})
+      });
+    }
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `users/${profile.uid}`);
+  }
+}
+
 export async function updateUserRole(uid: string, role: UserRole): Promise<void> {
   try {
     await setDoc(doc(db, 'users', uid), { role }, { merge: true });
   } catch (err) {
     handleFirestoreError(err, OperationType.UPDATE, `users/${uid}`);
+    throw err;
+  }
+}
+
+export async function updateUserBanStatus(uid: string, isBanned: boolean): Promise<void> {
+  try {
+    await setDoc(doc(db, 'users', uid), { isBanned }, { merge: true });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, `users/${uid}`);
+    throw err;
+  }
+}
+
+export async function reviewCreatorApplicationInFirestore(params: {
+  appId: string;
+  targetUid: string;
+  status: 'approved' | 'rejected';
+  reviewerEmail: string;
+  notes?: string;
+  channelName: string;
+  channelHandle: string;
+  bio: string;
+}): Promise<void> {
+  const nowIso = new Date().toISOString();
+  try {
+    await updateDoc(doc(db, 'creatorApplications', params.appId), {
+      status: params.status,
+      reviewedBy: params.reviewerEmail,
+      reviewNotes: params.notes || '',
+      reviewedAt: nowIso
+    });
+    if (params.status === 'approved') {
+      const chId = `ch_${params.targetUid.slice(0, 10)}`;
+      await setDoc(
+        doc(db, 'users', params.targetUid),
+        { role: 'creator', creatorStatus: 'approved', channelId: chId },
+        { merge: true }
+      );
+      await setDoc(
+        doc(db, 'channels', chId),
+        {
+          id: chId,
+          name: params.channelName,
+          handle: params.channelHandle,
+          description: params.bio,
+          ownerUid: params.targetUid,
+          verified: true,
+          avatarUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&auto=format&fit=crop&q=80',
+          bannerUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1200&auto=format&fit=crop&q=80',
+          subscribers: '1',
+          subscriberCountNumber: 1,
+          joinedDate: new Date().toLocaleDateString(),
+          totalViews: '0',
+          videosCount: 0
+        },
+        { merge: true }
+      );
+    } else {
+      await setDoc(
+        doc(db, 'users', params.targetUid),
+        { creatorStatus: 'rejected' },
+        { merge: true }
+      );
+    }
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, `creatorApplications/${params.appId}`);
     throw err;
   }
 }
@@ -677,8 +951,8 @@ export async function recordVideoPurchase(
       provider: purchaseData.provider,
       paymentProvider: purchaseData.provider,
       transactionReference: purchaseData.transactionReference,
-      status: 'verified',
-      paymentStatus: 'successful',
+      status: 'pending',
+      paymentStatus: 'pending',
       purchasedAt: nowIso,
       createdAt: nowIso,
       telebirrMerchantNumber: '0913767842',
@@ -700,6 +974,7 @@ export async function verifyVideoPurchase(
 ): Promise<void> {
   try {
     await updateDoc(doc(db, 'videoPurchases', purchaseId), {
+      status: 'verified',
       paymentStatus: 'successful',
       verifiedAt: new Date().toISOString()
     });
@@ -720,6 +995,7 @@ export async function refundVideoPurchase(
 ): Promise<void> {
   try {
     await updateDoc(doc(db, 'videoPurchases', purchaseId), {
+      status: 'refunded',
       paymentStatus: 'refunded'
     });
     await logPlatformActivity(

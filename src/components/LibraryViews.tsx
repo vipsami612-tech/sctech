@@ -36,10 +36,12 @@ export const LibraryViews: React.FC = () => {
     currentPlaylistId,
     downloads,
     removeDownload,
-    startDownload,
     navigate,
     setIsUploadModalOpen,
     createPlaylist,
+    removePlaylist,
+    userProfile,
+    isAdmin,
     t,
     videoPurchases
   } = useApp();
@@ -47,6 +49,8 @@ export const LibraryViews: React.FC = () => {
   const [historySearch, setHistorySearch] = useState('');
   const [downloadSearch, setDownloadSearch] = useState('');
   const [newPlaylistTitle, setNewPlaylistTitle] = useState('');
+  const [newPlaylistDesc, setNewPlaylistDesc] = useState('');
+  const [newPlaylistPrivate, setNewPlaylistPrivate] = useState(false);
   const [showCreatePlaylist, setShowCreatePlaylist] = useState(false);
 
   // 1. WATCH HISTORY VIEW
@@ -349,6 +353,21 @@ export const LibraryViews: React.FC = () => {
 
   // 5. PLAYLISTS VIEW
   if (viewMode === 'playlists') {
+    const handleCreatePlaylistSubmit = (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!newPlaylistTitle.trim()) return;
+      const createdId = createPlaylist(
+        newPlaylistTitle.trim(),
+        newPlaylistDesc.trim() || 'Custom SVTech playlist',
+        newPlaylistPrivate
+      );
+      setNewPlaylistTitle('');
+      setNewPlaylistDesc('');
+      setNewPlaylistPrivate(false);
+      setShowCreatePlaylist(false);
+      navigate('playlist-detail', { playlistId: createdId });
+    };
+
     return (
       <div className="max-w-6xl mx-auto px-4 py-6 space-y-6">
         <div className="flex items-center justify-between pb-4 border-b border-zinc-200 dark:border-zinc-800">
@@ -371,31 +390,208 @@ export const LibraryViews: React.FC = () => {
 
         {/* Playlists Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-          {playlists.map(pl => (
-            <div
-              key={pl.id}
-              onClick={() => navigate('playlist-detail', { playlistId: pl.id })}
-              className="group cursor-pointer rounded-2xl p-3 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800/80 hover:border-zinc-400 dark:hover:border-zinc-700 transition-all"
-            >
-              <div className="aspect-video rounded-xl bg-zinc-800 overflow-hidden relative mb-2">
-                <img
-                  src={
-                    pl.customThumbnail ||
-                    'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80'
-                  }
-                  alt=""
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                />
-                <div className="absolute inset-0 bg-black/40 flex items-center justify-center text-white">
-                  <Play className="w-8 h-8 fill-white opacity-80 group-hover:scale-110 transition-transform" />
+          {playlists.map(pl => {
+            const canDelete = Boolean(
+              isAdmin || !pl.ownerUid || pl.ownerUid === userProfile.uid
+            );
+            return (
+              <div
+                key={pl.id}
+                onClick={() => navigate('playlist-detail', { playlistId: pl.id })}
+                className="group cursor-pointer rounded-2xl p-3 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800/80 hover:border-zinc-400 dark:hover:border-zinc-700 transition-all relative"
+              >
+                <div className="aspect-video rounded-xl bg-zinc-800 overflow-hidden relative mb-2">
+                  <img
+                    src={
+                      pl.customThumbnail ||
+                      'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80'
+                    }
+                    alt=""
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                  />
+                  <div className="absolute inset-0 bg-black/40 flex items-center justify-center text-white">
+                    <Play className="w-8 h-8 fill-white opacity-80 group-hover:scale-110 transition-transform" />
+                  </div>
+                </div>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <h3 className="font-semibold text-sm text-zinc-950 dark:text-white line-clamp-1">
+                      {pl.title}
+                    </h3>
+                    <p className="text-xs text-zinc-500 mt-0.5 flex items-center gap-1.5">
+                      <span>{pl.videoIds.length} videos</span>
+                      <span>·</span>
+                      {pl.isPrivate ? <Lock className="w-3 h-3" /> : <Globe className="w-3 h-3" />}
+                    </p>
+                  </div>
+                  {canDelete && (
+                    <button
+                      type="button"
+                      onClick={e => {
+                        e.stopPropagation();
+                        removePlaylist(pl.id);
+                      }}
+                      title="Delete playlist"
+                      className="p-1.5 rounded-lg text-zinc-400 hover:text-rose-600 hover:bg-zinc-200 dark:hover:bg-zinc-800"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
               </div>
-              <h3 className="font-semibold text-sm text-zinc-950 dark:text-white line-clamp-1">
-                {pl.title}
-              </h3>
-              <p className="text-xs text-zinc-500 mt-0.5">{pl.videoIds.length} videos</p>
+            );
+          })}
+        </div>
+
+        {/* Create Playlist Modal */}
+        {showCreatePlaylist && (
+          <div
+            className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+            onClick={() => setShowCreatePlaylist(false)}
+          >
+            <div
+              onClick={e => e.stopPropagation()}
+              className="w-full max-w-md bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 p-6 space-y-4 shadow-2xl"
+            >
+              <div className="flex items-center justify-between">
+                <h2 className="font-display font-bold text-base text-zinc-950 dark:text-white">
+                  Create New Playlist
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setShowCreatePlaylist(false)}
+                  className="p-1 rounded-full text-zinc-400 hover:text-zinc-800 dark:hover:text-white"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <form onSubmit={handleCreatePlaylistSubmit} className="space-y-3">
+                <input
+                  type="text"
+                  required
+                  value={newPlaylistTitle}
+                  onChange={e => setNewPlaylistTitle(e.target.value)}
+                  placeholder="Playlist title..."
+                  className="w-full px-3.5 py-2 rounded-xl text-xs bg-zinc-50 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700"
+                />
+                <textarea
+                  rows={2}
+                  value={newPlaylistDesc}
+                  onChange={e => setNewPlaylistDesc(e.target.value)}
+                  placeholder="Optional description..."
+                  className="w-full px-3.5 py-2 rounded-xl text-xs bg-zinc-50 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700"
+                />
+                <label className="flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-300">
+                  <input
+                    type="checkbox"
+                    checked={newPlaylistPrivate}
+                    onChange={e => setNewPlaylistPrivate(e.target.checked)}
+                    className="rounded text-rose-600"
+                  />
+                  <span>Private playlist</span>
+                </label>
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowCreatePlaylist(false)}
+                    className="px-4 py-2 rounded-xl text-xs font-semibold text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                  >
+                    {t.common.cancel}
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 rounded-xl text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white"
+                  >
+                    Create
+                  </button>
+                </div>
+              </form>
             </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // 5b. PLAYLIST DETAIL VIEW
+  if (viewMode === 'playlist-detail') {
+    const playlist = playlists.find(pl => pl.id === currentPlaylistId) || playlists[0];
+    const playlistVideos = playlist
+      ? videos.filter(v => playlist.videoIds.includes(v.id))
+      : [];
+    const canDelete = Boolean(
+      playlist && (isAdmin || !playlist.ownerUid || playlist.ownerUid === userProfile.uid)
+    );
+
+    if (!playlist) {
+      return (
+        <div className="max-w-4xl mx-auto px-4 py-12 text-center space-y-3">
+          <p className="text-sm text-zinc-500">Playlist not found.</p>
+          <button
+            type="button"
+            onClick={() => navigate('playlists')}
+            className="px-4 py-2 rounded-xl text-xs font-semibold bg-rose-600 text-white"
+          >
+            {t.common.back}
+          </button>
+        </div>
+      );
+    }
+
+    return (
+      <div className="max-w-6xl mx-auto px-4 py-6 space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-zinc-200 dark:border-zinc-800">
+          <div>
+            <button
+              type="button"
+              onClick={() => navigate('playlists')}
+              className="text-xs font-semibold text-rose-600 hover:underline mb-1 block"
+            >
+              ← {t.nav.playlists}
+            </button>
+            <h1 className="font-display font-bold text-xl text-zinc-950 dark:text-white">
+              {playlist.title}
+            </h1>
+            <p className="text-xs text-zinc-500 mt-0.5">
+              {playlist.description} · {playlistVideos.length} videos
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {playlistVideos.length > 0 && (
+              <button
+                type="button"
+                onClick={() => navigate('watch', { videoId: playlistVideos[0].id })}
+                className="px-4 py-2 rounded-full text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white inline-flex items-center gap-1.5"
+              >
+                <Play className="w-3.5 h-3.5 fill-current" />
+                <span>Play All</span>
+              </button>
+            )}
+            {canDelete && (
+              <button
+                type="button"
+                onClick={async () => {
+                  await removePlaylist(playlist.id);
+                  navigate('playlists');
+                }}
+                className="px-3.5 py-2 rounded-full text-xs font-semibold border border-rose-500/40 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 inline-flex items-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{t.common.delete}</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+          {playlistVideos.map(vid => (
+            <VideoCard key={vid.id} video={vid} />
           ))}
+          {playlistVideos.length === 0 && (
+            <p className="col-span-full text-sm text-zinc-500 py-8 text-center">
+              No videos in this playlist yet.
+            </p>
+          )}
         </div>
       </div>
     );
@@ -485,20 +681,42 @@ export const LibraryViews: React.FC = () => {
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {purchasedVideos.map(vid => (
-              <div key={vid.id} className="flex flex-col">
-                <VideoCard video={vid} />
-                <div className="mt-2 p-2 rounded-xl bg-amber-500/5 border border-amber-500/20 text-[11px] flex items-center justify-between">
-                  <span className="text-zinc-500 dark:text-zinc-400">
-                    Ref: <span className="font-mono text-zinc-800 dark:text-zinc-200">{vid.purchaseInfo.transactionReference?.slice(0, 10)}</span>
-                  </span>
-                  <span className="font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                    <CheckCircle2 className="w-3 h-3" />
-                    Unlocked
-                  </span>
+            {purchasedVideos.map(vid => {
+              const pStatus = vid.purchaseInfo.paymentStatus || vid.purchaseInfo.status || 'pending';
+              const isVerified = pStatus === 'successful' || pStatus === 'verified';
+              return (
+                <div key={vid.purchaseInfo.id || vid.id} className="flex flex-col">
+                  <VideoCard video={vid} />
+                  <div className="mt-2 p-2 rounded-xl bg-amber-500/5 border border-amber-500/20 text-[11px] flex items-center justify-between">
+                    <span className="text-zinc-500 dark:text-zinc-400">
+                      Ref:{' '}
+                      <span className="font-mono text-zinc-800 dark:text-zinc-200">
+                        {vid.purchaseInfo.transactionReference?.slice(0, 12)}
+                      </span>
+                    </span>
+                    <span
+                      className={`font-semibold flex items-center gap-1 ${
+                        isVerified
+                          ? 'text-emerald-600 dark:text-emerald-400'
+                          : 'text-amber-600 dark:text-amber-400'
+                      }`}
+                    >
+                      {isVerified ? (
+                        <>
+                          <CheckCircle2 className="w-3 h-3" />
+                          <span>Unlocked</span>
+                        </>
+                      ) : (
+                        <>
+                          <Clock className="w-3 h-3" />
+                          <span>{pStatus}</span>
+                        </>
+                      )}
+                    </span>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
